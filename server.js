@@ -46,7 +46,7 @@ function sleep(ms) {
 async function procesarClienteAFIP(page, cuit, clave) {
   try {
     console.log(`  → Navegando a login de AFIP...`);
-    
+
     // 1. IR A LA PÁGINA DE LOGIN
     await page.goto('https://auth.afip.gob.ar/contribuyente_/login.xhtml', {
       waitUntil: 'networkidle2',
@@ -57,34 +57,22 @@ async function procesarClienteAFIP(page, cuit, clave) {
 
     // 2. INGRESAR CUIT
     console.log(`  → Ingresando CUIT: ${cuit}`);
-    
-    await page.waitForXPath('/html/body/main/div/div/div/div/div/div/form/div[1]/input', { timeout: 10000 });
-    const inputCuit = await page.$x('/html/body/main/div/div/div/div/div/div/form/div[1]/input');
-    
-    if (inputCuit.length === 0) {
-      throw new Error('No se encontró el campo de CUIT');
-    }
-    
-    await inputCuit[0].click();
+
+    await page.waitForSelector('#F1\\:username', { timeout: 10000 });
+    await page.click('#F1\\:username');
     await sleep(300);
-    await inputCuit[0].type(cuit, { delay: 100 });
+    await page.type('#F1\\:username', cuit, { delay: 100 });
 
     // 3. CLICK EN SIGUIENTE
     console.log(`  → Click en Siguiente...`);
-    
+
     await sleep(500);
-    const btnSiguiente = await page.$x('/html/body/main/div/div/div/div/div/div/form/input[2]');
-    
-    if (btnSiguiente.length === 0) {
-      throw new Error('No se encontró el botón Siguiente');
-    }
-    
-    await btnSiguiente[0].click();
+    await page.click('#F1\\:btnSiguiente');
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
 
     // 4. INGRESAR CONTRASEÑA
     console.log(`  → Ingresando contraseña...`);
-    
+
     await page.waitForSelector('#F1\\:password', { timeout: 10000 });
     await page.click('#F1\\:password');
     await sleep(300);
@@ -92,15 +80,9 @@ async function procesarClienteAFIP(page, cuit, clave) {
 
     // 5. CLICK EN INGRESAR
     console.log(`  → Click en Ingresar...`);
-    
+
     await sleep(500);
-    const btnIngresar = await page.$x('/html/body/main/div/div/div/div/div/div/form/div/input[2]');
-    
-    if (btnIngresar.length === 0) {
-      throw new Error('No se encontró el botón Ingresar');
-    }
-    
-    await btnIngresar[0].click();
+    await page.click('#F1\\:btnIngresar');
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
 
     // 6. ESPERAR A QUE CARGUE EL DASHBOARD
@@ -108,16 +90,10 @@ async function procesarClienteAFIP(page, cuit, clave) {
 
     // 7. EXTRAER EL NOMBRE DEL CONTRIBUYENTE
     console.log(`  → Extrayendo nombre del contribuyente...`);
-    
-    await page.waitForXPath('/html/body/div/div/div[1]/header/nav/div/div[1]/div[2]/div/div[1]/div/strong', { timeout: 10000 });
-    const nombreElement = await page.$x('/html/body/div/div/div[1]/header/nav/div/div[1]/div[2]/div/div[1]/div/strong');
-    
-    if (nombreElement.length === 0) {
-      throw new Error('No se encontró el nombre del contribuyente en el dashboard');
-    }
-    
-    const nombre = await page.evaluate(el => el.textContent.trim(), nombreElement[0]);
-    
+
+    await page.waitForSelector('strong.text-primary', { timeout: 10000 });
+    const nombre = await page.$eval('strong.text-primary', el => el.textContent.trim());
+
     console.log(`  ✓ Nombre extraído: ${nombre}`);
 
     return {
@@ -177,7 +153,7 @@ app.post("/api/process", upload.single("excel"), async (req, res) => {
     // Procesar cada cliente CON NAVEGADOR INDEPENDIENTE
     for (let i = 0; i < dataRows.length; i++) {
       const row = dataRows[i];
-      
+
       const CUIT = String(row[0] || '').trim().replace(/\D/g, '');
       const CLAVE = String(row[1] || '').trim();
       const NUM_CLIENTE = String(row[2] || '').trim();
@@ -298,7 +274,7 @@ app.post("/api/process", upload.single("excel"), async (req, res) => {
     });
 
     res.end();
-    
+
     // Limpiar recursos
     if (browser) {
       await browser.close();
