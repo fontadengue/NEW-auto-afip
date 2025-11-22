@@ -8,7 +8,7 @@ const puppeteer = require('puppeteer');
  */
 async function procesarClienteAFIP(cuit, clave) {
   let browser = null;
-  
+
   try {
     // Configuración del navegador
     browser = await puppeteer.launch({
@@ -25,11 +25,11 @@ async function procesarClienteAFIP(cuit, clave) {
     });
 
     const page = await browser.newPage();
-    
+
     // Configurar viewport y user agent
     await page.setViewport({ width: 1920, height: 1080 });
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    
+
     // Ocultar que es un bot
     await page.evaluateOnNewDocument(() => {
       Object.defineProperty(navigator, 'webdriver', {
@@ -62,9 +62,9 @@ async function procesarClienteAFIP(cuit, clave) {
     // PASO 2: INGRESAR CUIT
     // ============================================
     console.log(`[${cuit}] Ingresando CUIT...`);
-    
+
     await page.waitForSelector('#F1\\:username', { timeout: 10000 });
-    
+
     // Tipear con delay aleatorio para simular humano
     await page.click('#F1\\:username');
     await sleep(300);
@@ -74,11 +74,11 @@ async function procesarClienteAFIP(cuit, clave) {
 
     // Click en "Siguiente"
     await page.click('#F1\\:btnSiguiente');
-    
+
     console.log(`[${cuit}] CUIT ingresado, esperando página de contraseña...`);
-    
+
     // Esperar a que cargue la página de contraseña
-    await page.waitForNavigation({ 
+    await page.waitForNavigation({
       waitUntil: 'networkidle2',
       timeout: 30000
     });
@@ -87,7 +87,7 @@ async function procesarClienteAFIP(cuit, clave) {
     // PASO 3: INGRESAR CONTRASEÑA
     // ============================================
     console.log(`[${cuit}] Ingresando contraseña...`);
-    
+
     await page.waitForSelector('#F1\\:password', { timeout: 10000 });
     await page.click('#F1\\:password');
     await sleep(300);
@@ -97,13 +97,13 @@ async function procesarClienteAFIP(cuit, clave) {
 
     // Click en "Ingresar"
     await page.click('#F1\\:btnIngresar');
-    
+
     console.log(`[${cuit}] Contraseña ingresada, esperando dashboard...`);
-    
+
     // Esperar a que cargue el dashboard
-    await page.waitForNavigation({ 
-      waitUntil: 'networkidle2', 
-      timeout: 30000 
+    await page.waitForNavigation({
+      waitUntil: 'networkidle2',
+      timeout: 30000
     });
 
     // Esperar un poco más para asegurar que todo cargó
@@ -113,18 +113,18 @@ async function procesarClienteAFIP(cuit, clave) {
     // PASO 4: VERIFICAR LOGIN EXITOSO
     // ============================================
     const loginExitoso = await verificarLoginExitoso(page);
-    
+
     if (!loginExitoso) {
       // Tomar screenshot para debugging
       try {
-        await page.screenshot({ 
+        await page.screenshot({
           path: `error_login_${cuit}_${Date.now()}.png`,
-          fullPage: true 
+          fullPage: true
         });
       } catch (e) {
         console.error(`[${cuit}] No se pudo tomar screenshot:`, e.message);
       }
-      
+
       throw new Error('Login fallido - Verificar credenciales');
     }
 
@@ -135,18 +135,18 @@ async function procesarClienteAFIP(cuit, clave) {
     // ============================================
     // AQUÍ ES DONDE VAS A INDICARME QUÉ HACER
     // Por ahora dejo placeholders comentados con ejemplos
-    
+
     console.log(`[${cuit}] Navegando a sección objetivo...`);
-    
+
     // Ejemplo 1: Si necesitas ir a una URL específica
     // await page.goto('https://auth.afip.gob.ar/contribuyente/admin/administrar.xhtml', {
     //   waitUntil: 'networkidle2'
     // });
-    
+
     // Ejemplo 2: Si necesitas hacer click en un menú
     // await page.click('a[href*="padron"]');
     // await page.waitForSelector('.datos-contribuyente');
-    
+
     // Ejemplo 3: Si necesitas esperar que cargue algo específico
     // await page.waitForSelector('#datosGenerales', { timeout: 10000 });
 
@@ -156,9 +156,9 @@ async function procesarClienteAFIP(cuit, clave) {
     // PASO 6: EXTRAER DATOS
     // ============================================
     // AQUÍ EXTRAEREMOS LOS DATOS QUE ME INDIQUES
-    
+
     console.log(`[${cuit}] Extrayendo datos...`);
-    
+
     const datosExtraidos = await extraerDatos(page, cuit);
 
     console.log(`[${cuit}] ✓ Datos extraídos exitosamente`);
@@ -167,24 +167,24 @@ async function procesarClienteAFIP(cuit, clave) {
 
   } catch (error) {
     console.error(`[${cuit}] ✗ Error:`, error.message);
-    
+
     // Intentar tomar screenshot del error si el browser sigue vivo
     try {
       if (browser) {
         const pages = await browser.pages();
         if (pages.length > 0) {
-          await pages[0].screenshot({ 
+          await pages[0].screenshot({
             path: `error_${cuit}_${Date.now()}.png`,
-            fullPage: true 
+            fullPage: true
           });
         }
       }
     } catch (e) {
       // Ignorar errores al tomar screenshot
     }
-    
+
     throw error;
-    
+
   } finally {
     if (browser) {
       await browser.close();
@@ -200,12 +200,12 @@ async function verificarLoginExitoso(page) {
   try {
     const urlActual = page.url();
     console.log(`URL después del login: ${urlActual}`);
-    
+
     // Verificación 1: La URL no debe contener "login" o "error"
     if (urlActual.includes('login') || urlActual.includes('error')) {
       return false;
     }
-    
+
     // Verificación 2: Buscar elementos que indican login exitoso
     // Ajusta estos selectores según la página real de AFIP
     const elementosExitosos = [
@@ -215,7 +215,7 @@ async function verificarLoginExitoso(page) {
       'a[title*="Salir"]',
       '.navbar-user'
     ];
-    
+
     for (const selector of elementosExitosos) {
       const elemento = await page.$(selector);
       if (elemento) {
@@ -223,7 +223,7 @@ async function verificarLoginExitoso(page) {
         return true;
       }
     }
-    
+
     // Verificación 3: Buscar mensajes de error
     const mensajesError = await page.evaluate(() => {
       const errores = [];
@@ -233,7 +233,7 @@ async function verificarLoginExitoso(page) {
         '.mensaje-error',
         '[class*="error"]'
       ];
-      
+
       posiblesErrores.forEach(selector => {
         const elementos = document.querySelectorAll(selector);
         elementos.forEach(el => {
@@ -242,18 +242,18 @@ async function verificarLoginExitoso(page) {
           }
         });
       });
-      
+
       return errores;
     });
-    
+
     if (mensajesError.length > 0) {
       console.log(`Mensajes de error encontrados: ${mensajesError.join(', ')}`);
       return false;
     }
-    
+
     // Si llegamos aquí y la URL cambió, asumimos que el login fue exitoso
     return !urlActual.includes('login');
-    
+
   } catch (error) {
     console.error('Error verificando login:', error.message);
     return false;
@@ -262,69 +262,34 @@ async function verificarLoginExitoso(page) {
 
 /**
  * Función para extraer datos de la página
- * ESTA FUNCIÓN LA COMPLETAREMOS CUANDO ME DIGAS QUÉ EXTRAER
  */
 async function extraerDatos(page, cuit) {
   try {
-    // ============================================
-    // AQUÍ IRÁN LAS INSTRUCCIONES DE EXTRACCIÓN
-    // ============================================
-    
+    console.log(`[${cuit}] Extrayendo nombre del usuario...`);
+
     // Esperar a que la página esté completamente cargada
-    await page.waitForTimeout(1000);
-    
-    // EJEMPLOS COMENTADOS - Descomenta y adapta según necesites:
-    
-    // Ejemplo 1: Extraer datos generales de contribuyente
-    // const datosGenerales = await page.evaluate(() => {
-    //   return {
-    //     razonSocial: document.querySelector('#razonSocial')?.textContent.trim(),
-    //     estado: document.querySelector('#estado')?.textContent.trim(),
-    //     categoria: document.querySelector('#categoria')?.textContent.trim()
-    //   };
-    // });
-    
-    // Ejemplo 2: Extraer una tabla
-    // const tabla = await page.$$eval('table.datos tr', rows => {
-    //   return rows.map(row => {
-    //     const cells = row.querySelectorAll('td');
-    //     return {
-    //       campo1: cells[0]?.textContent.trim(),
-    //       campo2: cells[1]?.textContent.trim(),
-    //       campo3: cells[2]?.textContent.trim()
-    //     };
-    //   });
-    // });
-    
-    // Ejemplo 3: Extraer lista de elementos
-    // const lista = await page.$$eval('.item', items => {
-    //   return items.map(item => item.textContent.trim());
-    // });
-    
-    // Ejemplo 4: Hacer click y extraer de modal/popup
-    // await page.click('button.ver-detalle');
-    // await page.waitForSelector('.modal-detalle');
-    // const detalle = await page.$eval('.modal-detalle', el => el.textContent);
-    
-    // Por ahora retorno un objeto de ejemplo con timestamp
+    await sleep(2000);
+
+    // Extraer el nombre del usuario desde el elemento <strong class="text-primary">
+    const nombreUsuario = await page.evaluate(() => {
+      const elemento = document.querySelector('strong.text-primary');
+      return elemento ? elemento.textContent.trim() : null;
+    });
+
+    if (!nombreUsuario) {
+      console.warn(`[${cuit}] No se pudo encontrar el nombre del usuario`);
+    } else {
+      console.log(`[${cuit}] Nombre extraído: ${nombreUsuario}`);
+    }
+
     const datosExtraidos = {
       cuit: cuit,
+      nombre: nombreUsuario,
       timestamp: new Date().toISOString(),
       url_actual: page.url(),
-      mensaje: 'Estructura lista - Esperando instrucciones de extracción',
-      
-      // AQUÍ AGREGAREMOS LOS DATOS REALES:
-      // ejemplo_dato1: null,
-      // ejemplo_dato2: null,
-      // ejemplo_tabla: [],
-      // ejemplo_lista: []
+      loginExitoso: true
     };
-    
-    // También podemos extraer el HTML completo para análisis
-    // (útil para debugging y ver qué hay disponible)
-    // const htmlCompleto = await page.content();
-    // console.log('HTML disponible:', htmlCompleto.substring(0, 500));
-    
+
     return datosExtraidos;
 
   } catch (error) {
