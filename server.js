@@ -96,9 +96,79 @@ async function procesarClienteAFIP(page, cuit, clave) {
 
     console.log(`  ✓ Nombre extraído: ${nombre}`);
 
+    // ============================================
+    // 8. BUSCAR Y ACCEDER A MONOTRIBUTO
+    // ============================================
+    console.log(`  → Buscando sección de Monotributo...`);
+
+    let facturasEmitidas = null;
+
+    try {
+      // Esperar y hacer click en el buscador
+      await page.waitForSelector('#buscadorInput', { timeout: 10000 });
+      await sleep(500);
+
+      console.log(`  → Haciendo click en el buscador...`);
+      await page.click('#buscadorInput');
+      await sleep(500);
+
+      // Tipear "Monotributo" en el buscador
+      console.log(`  → Escribiendo "Monotributo" en el buscador...`);
+      await page.type('#buscadorInput', 'Monotributo', { delay: 100 });
+      await sleep(1000);
+
+      // Esperar a que aparezca la opción de Monotributo
+      console.log(`  → Esperando resultados de búsqueda...`);
+      await page.waitForFunction(
+        () => {
+          const elementos = Array.from(document.querySelectorAll('p.small.text-muted'));
+          return elementos.some(el => el.textContent.trim() === 'Monotributo');
+        },
+        { timeout: 10000 }
+      );
+
+      await sleep(500);
+
+      // Hacer click en la opción "Monotributo"
+      console.log(`  → Haciendo click en opción Monotributo...`);
+      await page.evaluate(() => {
+        const elementos = Array.from(document.querySelectorAll('p.small.text-muted'));
+        const monotributo = elementos.find(el => el.textContent.trim() === 'Monotributo');
+        if (monotributo) {
+          monotributo.click();
+        }
+      });
+
+      // Esperar a que se cargue la nueva página/sección
+      console.log(`  → Esperando que cargue la sección de Monotributo...`);
+      await sleep(3000);
+
+      // Esperar a que aparezca el elemento con el monto
+      await page.waitForSelector('#spanFacturometroMontoMobile', { timeout: 15000 });
+      await sleep(1000);
+
+      // Extraer el valor del facturómetro
+      facturasEmitidas = await page.evaluate(() => {
+        const elemento = document.querySelector('#spanFacturometroMontoMobile');
+        return elemento ? elemento.textContent.trim() : null;
+      });
+
+      if (facturasEmitidas) {
+        console.log(`  ✓ Facturas Emitidas extraídas: ${facturasEmitidas}`);
+      } else {
+        console.warn(`  ⚠ No se pudo encontrar el monto de facturas`);
+      }
+
+    } catch (error) {
+      console.error(`  ⚠ Error extrayendo datos de Monotributo:`, error.message);
+      // No lanzamos el error, solo registramos y continuamos
+      facturasEmitidas = 'Error al extraer';
+    }
+
     return {
       success: true,
-      nombre: nombre
+      nombre: nombre,
+      facturasEmitidas: facturasEmitidas
     };
 
   } catch (error) {
@@ -201,13 +271,15 @@ app.post("/api/process", upload.single("excel"), async (req, res) => {
       if (resultado.success) {
         resultados.push({
           numCliente: NUM_CLIENTE,
-          nombre: resultado.nombre
+          nombre: resultado.nombre,
+          facturasEmitidas: resultado.facturasEmitidas
         });
         console.log(`✅ [${i + 1}/${total}] Procesado exitosamente`);
       } else {
         resultados.push({
           numCliente: NUM_CLIENTE,
-          nombre: `ERROR: ${resultado.error}`
+          nombre: `ERROR: ${resultado.error}`,
+          facturasEmitidas: 'N/A'
         });
         console.log(`❌ [${i + 1}/${total}] Error al procesar`);
       }
@@ -231,8 +303,8 @@ app.post("/api/process", upload.single("excel"), async (req, res) => {
     // CREAR EXCEL DE SALIDA
     // ================================
     const datosExcel = [
-      ['Num de Cliente', 'Nombre del Cliente'],
-      ...resultados.map(r => [r.numCliente, r.nombre])
+      ['Num de Cliente', 'Nombre del Cliente', 'Facturas Emitidas'],
+      ...resultados.map(r => [r.numCliente, r.nombre, r.facturasEmitidas || 'N/A'])
     ];
 
     const nuevoWorkbook = XLSX.utils.book_new();
