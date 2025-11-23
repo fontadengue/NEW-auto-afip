@@ -282,9 +282,79 @@ async function extraerDatos(page, cuit) {
       console.log(`[${cuit}] Nombre extraído: ${nombreUsuario}`);
     }
 
+    // ============================================
+    // PASO: BUSCAR Y ACCEDER A MONOTRIBUTO
+    // ============================================
+    console.log(`[${cuit}] Buscando sección de Monotributo...`);
+
+    let montoFacturas = null;
+
+    try {
+      // Esperar y hacer click en el buscador
+      await page.waitForSelector('#buscadorInput', { timeout: 10000 });
+      await sleep(500);
+      
+      console.log(`[${cuit}] Haciendo click en el buscador...`);
+      await page.click('#buscadorInput');
+      await sleep(500);
+
+      // Tipear "Monotributo" en el buscador
+      console.log(`[${cuit}] Escribiendo "Monotributo" en el buscador...`);
+      await page.type('#buscadorInput', 'Monotributo', { delay: 100 });
+      await sleep(1000);
+
+      // Esperar a que aparezca la opción de Monotributo
+      console.log(`[${cuit}] Esperando resultados de búsqueda...`);
+      await page.waitForFunction(
+        () => {
+          const elementos = Array.from(document.querySelectorAll('p.small.text-muted'));
+          return elementos.some(el => el.textContent.trim() === 'Monotributo');
+        },
+        { timeout: 10000 }
+      );
+
+      await sleep(500);
+
+      // Hacer click en la opción "Monotributo"
+      console.log(`[${cuit}] Haciendo click en opción Monotributo...`);
+      await page.evaluate(() => {
+        const elementos = Array.from(document.querySelectorAll('p.small.text-muted'));
+        const monotributo = elementos.find(el => el.textContent.trim() === 'Monotributo');
+        if (monotributo) {
+          monotributo.click();
+        }
+      });
+
+      // Esperar a que se cargue la nueva página/sección
+      console.log(`[${cuit}] Esperando que cargue la sección de Monotributo...`);
+      await sleep(3000);
+
+      // Esperar a que aparezca el elemento con el monto
+      await page.waitForSelector('#spanFacturometroMontoMobile', { timeout: 15000 });
+      await sleep(1000);
+
+      // Extraer el valor del facturómetro
+      montoFacturas = await page.evaluate(() => {
+        const elemento = document.querySelector('#spanFacturometroMontoMobile');
+        return elemento ? elemento.textContent.trim() : null;
+      });
+
+      if (montoFacturas) {
+        console.log(`[${cuit}] ✓ Facturas Emitidas extraídas: ${montoFacturas}`);
+      } else {
+        console.warn(`[${cuit}] ⚠ No se pudo encontrar el monto de facturas`);
+      }
+
+    } catch (error) {
+      console.error(`[${cuit}] ⚠ Error extrayendo datos de Monotributo:`, error.message);
+      // No lanzamos el error, solo registramos y continuamos
+      montoFacturas = 'Error al extraer';
+    }
+
     const datosExtraidos = {
       cuit: cuit,
       nombre: nombreUsuario,
+      facturasEmitidas: montoFacturas,
       timestamp: new Date().toISOString(),
       url_actual: page.url(),
       loginExitoso: true
