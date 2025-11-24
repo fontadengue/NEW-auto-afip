@@ -111,10 +111,18 @@ async function procesarClienteAFIP(page, cuit, clave) {
       });
 
       console.log(`  → Página de Monotributo cargada`);
-      await sleep(2000);
+
+      // Esperar 20 segundos para que la página cargue completamente
+      console.log(`  → Esperando 20 segundos para que cargue el contenido...`);
+      await sleep(20000);
 
       // Esperar a que aparezca el elemento con el monto
-      await page.waitForSelector('#spanFacturometroMontoMobile', { timeout: 15000 });
+      console.log(`  → Buscando elemento de facturación...`);
+      await page.waitForSelector('#spanFacturometroMontoMobile', {
+        visible: true,
+        timeout: 20000
+      });
+
       await sleep(1000);
 
       // Extraer el valor del facturómetro
@@ -127,6 +135,7 @@ async function procesarClienteAFIP(page, cuit, clave) {
         console.log(`  ✓ Facturas Emitidas extraídas: ${facturasEmitidas}`);
       } else {
         console.warn(`  ⚠ No se pudo encontrar el monto de facturas`);
+        facturasEmitidas = 'No encontrado';
       }
 
     } catch (error) {
