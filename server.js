@@ -116,31 +116,89 @@ async function procesarClienteAFIP(page, cuit, clave) {
       console.log(`  → Esperando 20 segundos para que cargue el contenido...`);
       await sleep(20000);
 
-      // Esperar a que aparezca el elemento con el monto
+      // Intentar encontrar el elemento con diferentes estrategias
       console.log(`  → Buscando elemento de facturación...`);
-      await page.waitForSelector('#spanFacturometroMontoMobile', {
-        visible: true,
-        timeout: 20000
-      });
 
-      await sleep(1000);
+      // Estrategia 1: Buscar por ID exacto
+      let elementoEncontrado = await page.$('#spanFacturometroMontoMobile');
 
-      // Extraer el valor del facturómetro
+      if (!elementoEncontrado) {
+        console.log(`  → Elemento #spanFacturometroMontoMobile no encontrado, buscando alternativas...`);
+
+        // Estrategia 2: Buscar cualquier span que contenga "Facturometro" o "Monto"
+        elementoEncontrado = await page.$('[id*="Facturometro"]');
+
+        if (!elementoEncontrado) {
+          // Estrategia 3: Inspeccionar el HTML para debugging
+          console.log(`  → Inspeccionando HTML de la página...`);
+          const htmlSnippet = await page.evaluate(() => {
+            // Buscar elementos que puedan contener el monto
+            const posiblesElementos = document.querySelectorAll('span[id*="span"], span[id*="monto"], span[id*="Monto"]');
+            const resultados = [];
+            posiblesElementos.forEach(el => {
+              if (el.id) {
+                resultados.push(`ID: ${el.id}, Texto: ${el.textContent.trim().substring(0, 50)}`);
+              }
+            });
+            return resultados.slice(0, 10); // Primeros 10 elementos
+          });
+
+          console.log(`  → Elementos encontrados en la página:`, htmlSnippet);
+
+          // Tomar screenshot para debugging
+          try {
+            await page.screenshot({
+              path: `/tmp/monotributo_debug_${Date.now()}.png`,
+              fullPage: true
+            });
+            console.log(`  → Screenshot guardado para debugging`);
+          } catch (e) {
+            console.log(`  → No se pudo guardar screenshot`);
+          }
+        }
+      }
+
+      // Extraer el valor
       facturasEmitidas = await page.evaluate(() => {
-        const elemento = document.querySelector('#spanFacturometroMontoMobile');
-        return elemento ? elemento.textContent.trim() : null;
+        // Intentar múltiples selectores
+        const selectores = [
+          '#spanFacturometroMontoMobile',
+          '#spanFacturometroMonto',
+          '[id*="FacturometroMonto"]',
+          '[id*="facturometro"]'
+        ];
+
+        for (const selector of selectores) {
+          const elemento = document.querySelector(selector);
+          if (elemento && elemento.textContent.trim()) {
+            return elemento.textContent.trim();
+          }
+        }
+
+        return null;
       });
 
       if (facturasEmitidas) {
         console.log(`  ✓ Facturas Emitidas extraídas: ${facturasEmitidas}`);
       } else {
-        console.warn(`  ⚠ No se pudo encontrar el monto de facturas`);
+        console.warn(`  ⚠ No se pudo encontrar el monto de facturas en ningún selector`);
         facturasEmitidas = 'No encontrado';
       }
 
     } catch (error) {
       console.error(`  ⚠ Error extrayendo datos de Monotributo:`, error.message);
-      // No lanzamos el error, solo registramos y continuamos
+
+      // Intentar tomar screenshot del error
+      try {
+        await page.screenshot({
+          path: `/tmp/monotributo_error_${Date.now()}.png`,
+          fullPage: true
+        });
+        console.log(`  → Screenshot de error guardado`);
+      } catch (e) {
+        // Ignorar si no se puede tomar screenshot
+      }
+
       facturasEmitidas = 'Error al extraer';
     }
 
