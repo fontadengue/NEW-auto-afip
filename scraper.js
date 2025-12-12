@@ -282,9 +282,208 @@ async function extraerDatos(page, cuit) {
       console.log(`[${cuit}] Nombre extraído: ${nombreUsuario}`);
     }
 
+    // ============================================
+    // PASO: BUSCAR Y ACCEDER A MONOTRIBUTO
+    // ============================================
+    console.log(`[${cuit}] Buscando sección de Monotributo...`);
+
+    let montoFacturas = null;
+
+    try {
+      // Esperar y hacer click en el buscador
+      await page.waitForSelector('#buscadorInput', { timeout: 10000 });
+      await sleep(500);
+      
+      console.log(`[${cuit}] Haciendo click en el buscador...`);
+      await page.click('#buscadorInput');
+      await sleep(500);
+
+      // Tipear "Monotributo" en el buscador
+      console.log(`[${cuit}] Escribiendo "Monotributo" en el buscador...`);
+      await page.type('#buscadorInput', 'Monotributo', { delay: 100 });
+      await sleep(1000);
+
+      // Esperar a que aparezca la opción de Monotributo
+      console.log(`[${cuit}] Esperando resultados de búsqueda...`);
+      await page.waitForFunction(
+        () => {
+          const elementos = Array.from(document.querySelectorAll('p.small.text-muted'));
+          return elementos.some(el => el.textContent.trim() === 'Monotributo');
+        },
+        { timeout: 10000 }
+      );
+
+      await sleep(500);
+
+      // Hacer click en la opción "Monotributo" y esperar navegación
+      console.log(`[${cuit}] Haciendo click en opción Monotributo...`);
+      
+      // Configurar listener para nueva página/popup si se abre
+      const newPagePromise = new Promise(resolve => {
+        browser.once('targetcreated', async target => {
+          const newPage = await target.page();
+          if (newPage) resolve(newPage);
+        });
+        // Timeout de 3 segundos si no se abre nueva página
+        setTimeout(() => resolve(null), 3000);
+      });
+
+      await page.evaluate(() => {
+        const elementos = Array.from(document.querySelectorAll('p.small.text-muted'));
+        const monotributo = elementos.find(el => el.textContent.trim() === 'Monotributo');
+        if (monotributo) {
+          monotributo.click();
+        }
+      });
+
+      // Verificar si se abrió una nueva página/pestaña
+      const newPage = await newPagePromise;
+      let targetPage = page;
+
+      if (newPage) {
+        console.log(`[${cuit}] Se abrió nueva ventana/pestaña para Monotributo`);
+        targetPage = newPage;
+        await targetPage.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
+      } else {
+        // Si no se abrió nueva página, esperar navegación en la página actual
+        console.log(`[${cuit}] Esperando navegación en la página actual...`);
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
+      }
+
+      // Esperar a que se cargue completamente
+      await sleep(3000);
+
+      console.log(`[${cuit}] URL actual: ${targetPage.url()}`);
+
+      // Intentar múltiples estrategias para encontrar el monto
+      console.log(`[${cuit}] Buscando elemento con el monto de facturas...`);
+
+      // Estrategia 1: Buscar por ID directo
+      montoFacturas = await targetPage.evaluate(() => {
+        const elemento = document.querySelector('#spanFacturometroMontoMobile');
+        return elemento ? elemento.textContent.trim() : null;
+      });
+
+      // Estrategia 2: Si no se encontró, buscar por el div padre y luego el span
+      if (!montoFacturas) {
+        console.log(`[${cuit}] Intentando estrategia alternativa...`);
+        montoFacturas = await targetPage.evaluate(() => {
+          const divMonto = document.querySelector('#divMontoFacturadoTextoMobile');
+          if (divMonto) {
+            // Buscar el siguiente elemento que contenga el monto
+            let nextElement = divMonto.nextElementSibling;
+            while (nextElement) {
+              const span = nextElement.querySelector('span[id*="Facturometro"]') || 
+                          nextElement.querySelector('span[id*="Monto"]');
+              if (span) {
+                return span.textContent.trim();
+              }
+              nextElement = nextElement.nextElementSibling;
+            }
+          }
+          return null;
+        });
+      }
+
+      // Estrategia 3: Buscar cualquier span que contenga "Facturometro" en su ID
+      if (!montoFacturas) {
+        console.log(`[${cuit}] Intentando búsqueda por patrón de ID...`);
+        montoFacturas = await targetPage.evaluate(() => {
+          const spans = document.querySelectorAll('span[id*="Facturometro"], span[id*="facturometro"]');
+          for (const span of spans) {
+            const texto = span.textContent.trim();
+            // Verificar que parezca un monto (contiene números y comas/puntos)
+            if (texto && /[\d.,]+/.test(texto)) {
+              return texto;
+            }
+          }
+          return null;
+        });
+      }
+
+      // Estrategia 4: Buscar por texto visible que contenga "Monto facturado"
+      if (!montoFacturas) {
+        console.log(`[${cuit}] Intentando búsqueda por texto visible...`);
+        montoFacturas = await targetPage.evaluate(() => {
+          const elementos = Array.from(document.querySelectorAll('*'));
+          for (const el of elementos) {
+            if (el.textContent.includes('Monto facturado')) {
+              // Buscar el siguiente elemento con números
+              let next = el.nextElementSibling;
+              while (next) {
+                const texto = next.textContent.trim();
+                if (/^\$?\s*[\d.,]+$/.test(texto)) {
+                  return texto;
+                }
+                // También buscar dentro del elemento
+                const spanConMonto = next.querySelector('span');
+                if (spanConMonto) {
+                  const textoSpan = spanConMonto.textContent.trim();
+                  if (/[\d.,]+/.test(textoSpan)) {
+                    return textoSpan;
+                  }
+                }
+                next = next.nextElementSibling;
+              }
+            }
+          }
+          return null;
+        });
+      }
+
+      if (montoFacturas) {
+        console.log(`[${cuit}] ✓ Facturas Emitidas extraídas: ${montoFacturas}`);
+      } else {
+        console.warn(`[${cuit}] ⚠ No se pudo encontrar el monto de facturas`);
+        
+        // Tomar screenshot para debugging
+        try {
+          await targetPage.screenshot({
+            path: `monotributo_${cuit}_${Date.now()}.png`,
+            fullPage: true
+          });
+          console.log(`[${cuit}] Screenshot guardado para debugging`);
+        } catch (e) {
+          console.error(`[${cuit}] No se pudo tomar screenshot:`, e.message);
+        }
+
+        // Guardar HTML para análisis
+        try {
+          const html = await targetPage.content();
+          const fs = require('fs');
+          fs.writeFileSync(`monotributo_${cuit}_${Date.now()}.html`, html);
+          console.log(`[${cuit}] HTML guardado para debugging`);
+        } catch (e) {
+          console.error(`[${cuit}] No se pudo guardar HTML:`, e.message);
+        }
+      }
+
+      // Cerrar la nueva página si se abrió
+      if (newPage && newPage !== page) {
+        await newPage.close();
+      }
+
+    } catch (error) {
+      console.error(`[${cuit}] ⚠ Error extrayendo datos de Monotributo:`, error.message);
+      
+      // Tomar screenshot del error
+      try {
+        await page.screenshot({
+          path: `error_monotributo_${cuit}_${Date.now()}.png`,
+          fullPage: true
+        });
+      } catch (e) {
+        // Ignorar errores al tomar screenshot
+      }
+      
+      // No lanzamos el error, solo registramos y continuamos
+      montoFacturas = 'Error al extraer';
+    }
+
     const datosExtraidos = {
       cuit: cuit,
       nombre: nombreUsuario,
+      facturasEmitidas: montoFacturas,
       timestamp: new Date().toISOString(),
       url_actual: page.url(),
       loginExitoso: true
