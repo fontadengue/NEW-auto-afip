@@ -1,314 +1,222 @@
-const express = require('express');
-const multer = require('multer');
-const xlsx = require('xlsx');
-const cors = require('cors');
-const { procesarClienteAFIP } = require('./scraper');
+const express = require("express");
+const cors = require("cors");
+const multer = require("multer");
+const XLSX = require("xlsx");
+const fs = require("fs");
+const puppeteer = require("puppeteer");
+const path = require("path");
 
 const app = express();
 
-// Configuración de multer para manejar archivos en memoria
-const upload = multer({ 
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 5 * 1024 * 1024 // Límite de 5MB
-  }
-});
-
-// Configuración de CORS
-const corsOptions = {
-  origin: process.env.FRONTEND_URL || '*',
-  methods: ['GET', 'POST'],
-  credentials: true
-};
-
-app.use(cors(corsOptions));
+// ================================
+// CORS
+// ================================
+app.use(cors());
 app.use(express.json());
 
-// Middleware para logging
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
-  next();
+// ================================
+// MULTER (SUBIDA DE ARCHIVOS)
+// ================================
+const upload = multer({ dest: "/tmp" });
+
+// ================================
+// HEALTH CHECK
+// ================================
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// ============================================
-// ENDPOINT PRINCIPAL: Procesar Excel
-// ============================================
-app.post('/api/process', upload.single('excel'), async (req, res) => {
-  const startTime = Date.now();
-  
+// ================================
+// SSE (EVENT STREAM)
+// ================================
+function sendSSE(res, data) {
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+// ================================
+// FUNCIÓN HELPER: SLEEP
+// ================================
+const { procesarClienteAFIP, sleep } = require('./scraper');
+
+// ================================
+// FUNCIÓN: PROCESAR UN CLIENTE EN AFIP (WRAPPER)
+// ================================
+
+
+// ================================
+// RUTA PRINCIPAL: /api/process
+// ================================
+app.post("/api/process", upload.single("excel"), async (req, res) => {
+  console.log("📥 Archivo recibido.");
+
+  if (!req.file) {
+    console.log("❌ No se recibió archivo.");
+    return res.status(400).json({ error: "No se recibió archivo" });
+  }
+
+  console.log(`📁 Archivo: ${req.file.originalname} (${req.file.size} bytes)`);
+
+  // Configurar SSE
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  let browser = null;
+  let excelPath = null;
+
   try {
-    // Validar que se recibió un archivo
-    if (!req.file) {
-      console.error('❌ No se recibió archivo');
-      return res.status(400).json({ 
-        error: 'No se recibió archivo Excel' 
-      });
+    // Leer Excel de entrada
+    const workbook = XLSX.readFile(req.file.path);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+    // Saltar primera fila si son headers
+    const dataRows = rows.slice(1).filter(row => row.length >= 3);
+
+    console.log(`📊 ${dataRows.length} clientes encontrados`);
+
+    if (dataRows.length === 0) {
+      throw new Error('No se encontraron datos válidos en el Excel');
     }
 
-    console.log(`📁 Archivo recibido: ${req.file.originalname} (${req.file.size} bytes)`);
-
-    // Validar extensión
-    const filename = req.file.originalname.toLowerCase();
-    if (!filename.endsWith('.xlsx') && !filename.endsWith('.xls')) {
-      console.error('❌ Formato de archivo inválido');
-      return res.status(400).json({ 
-        error: 'El archivo debe ser .xlsx o .xls' 
-      });
-    }
-
-    // Leer archivo Excel
-    let workbook;
-    try {
-      workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
-    } catch (error) {
-      console.error('❌ Error leyendo Excel:', error.message);
-      return res.status(400).json({ 
-        error: 'No se pudo leer el archivo Excel. Verifica que no esté corrupto.' 
-      });
-    }
-
-    // Obtener primera hoja
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
-    
-    // Convertir a JSON (ignorando primera fila como headers)
-    const data = xlsx.utils.sheet_to_json(worksheet, { 
-      header: ['cuit', 'clave'],
-      range: 1, // Salta la primera fila
-      raw: false // Convierte todo a string
-    });
-
-    console.log(`📊 Datos leídos del Excel: ${data.length} filas`);
-
-    // Validar y limpiar datos
-    const clientes = data
-      .filter(row => row.cuit && row.clave) // Solo filas con ambos datos
-      .map(row => ({
-        cuit: String(row.cuit).trim().replace(/\D/g, ''), // Solo números
-        clave: String(row.clave).trim()
-      }))
-      .filter(row => row.cuit.length >= 11); // CUIT válido
-
-    if (clientes.length === 0) {
-      console.error('❌ No se encontraron datos válidos');
-      return res.status(400).json({ 
-        error: 'No se encontraron datos válidos en el Excel. Verifica el formato: Columna A = CUIT, Columna B = Clave' 
-      });
-    }
-
-    console.log(`✅ ${clientes.length} clientes válidos para procesar`);
-    console.log(`🚀 Iniciando procesamiento...`);
-
-    // Configurar respuesta como Server-Sent Events (SSE)
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no' // Desactivar buffering en nginx
-    });
-
-    // Enviar un comentario inicial para mantener la conexión
-    res.write(': Conexión establecida\n\n');
-
+    const total = dataRows.length;
     const resultados = [];
-    let clienteActual = 0;
-    let exitosos = 0;
-    let fallidos = 0;
 
-    // Procesar cada cliente secuencialmente
-    for (const cliente of clientes) {
-      clienteActual++;
-      
+    // Procesar cada cliente CON NAVEGADOR INDEPENDIENTE
+    for (let i = 0; i < dataRows.length; i++) {
+      const row = dataRows[i];
+
+      const CUIT = String(row[0] || '').trim().replace(/\D/g, '');
+      const CLAVE = String(row[1] || '').trim();
+      const NUM_CLIENTE = String(row[2] || '').trim();
+
+      if (!CUIT || !CLAVE || !NUM_CLIENTE) {
+        console.log(`⚠️  [${i + 1}/${total}] Fila incompleta, saltando...`);
+        continue;
+      }
+
       console.log(`\n${'='.repeat(60)}`);
-      console.log(`📋 [${clienteActual}/${clientes.length}] Procesando CUIT: ${cliente.cuit}`);
+      console.log(`🔎 [${i + 1}/${total}] Cliente: ${NUM_CLIENTE} - CUIT: ${CUIT}`);
       console.log(`${'='.repeat(60)}`);
 
       // Enviar progreso al frontend
-      res.write(`data: ${JSON.stringify({
-        type: 'progress',
-        current: clienteActual,
-        total: clientes.length,
-        cuit: cliente.cuit,
-        exitosos,
-        fallidos
-      })}\n\n`);
+      sendSSE(res, {
+        type: "progress",
+        current: i + 1,
+        total,
+        cuit: CUIT,
+        numCliente: NUM_CLIENTE
+      });
 
+      // ABRIR NAVEGADOR NUEVO PARA ESTE CLIENTE
+      // Procesar cliente usando el módulo externo (que maneja su propio browser)
       try {
-        // Llamar al scraper de Puppeteer
-        const resultado = await procesarClienteAFIP(cliente.cuit, cliente.clave);
-        
-        resultados.push({
-          cuit: cliente.cuit,
-          success: true,
-          data: resultado,
-          timestamp: new Date().toISOString()
-        });
+        const resultado = await procesarClienteAFIP(CUIT, CLAVE);
 
-        exitosos++;
-        console.log(`✅ [${clienteActual}/${clientes.length}] Completado exitosamente`);
+        // Adaptar respuesta del nuevo scraper al formato esperado aquí
+        resultados.push({
+          numCliente: NUM_CLIENTE,
+          nombre: resultado.nombre,
+          facturasEmitidas: resultado.facturasEmitidas
+        });
+        console.log(`✅ [${i + 1}/${total}] Procesado exitosamente`);
 
       } catch (error) {
-        console.error(`❌ [${clienteActual}/${clientes.length}] Error:`, error.message);
-        
+        console.error(`❌ [${i + 1}/${total}] Error al procesar:`, error.message);
+
         resultados.push({
-          cuit: cliente.cuit,
-          success: false,
-          error: error.message,
-          timestamp: new Date().toISOString()
+          numCliente: NUM_CLIENTE,
+          nombre: `ERROR: ${error.message}`,
+          facturasEmitidas: 'N/A'
         });
-
-        fallidos++;
       }
 
-      // Espera aleatoria entre clientes (2-5 segundos) 
-      // para simular comportamiento humano y evitar rate limiting
-      if (clienteActual < clientes.length) {
-        const minDelay = parseInt(process.env.MIN_DELAY_BETWEEN_CLIENTS) || 2000;
-        const maxDelay = parseInt(process.env.MAX_DELAY_BETWEEN_CLIENTS) || 5000;
-        const espera = Math.floor(Math.random() * (maxDelay - minDelay)) + minDelay;
-        
-        console.log(`⏳ Esperando ${(espera/1000).toFixed(1)}s antes del siguiente cliente...`);
-        await new Promise(resolve => setTimeout(resolve, espera));
+      // Espera entre clientes para simular comportamiento humano
+      if (i < dataRows.length - 1) {
+        const espera = 2000 + Math.random() * 3000;
+        console.log(`⏳ Esperando ${(espera / 1000).toFixed(1)}s antes del siguiente cliente...`);
+        await sleep(espera);
       }
+
+
     }
 
-    // Calcular estadísticas finales
-    const endTime = Date.now();
-    const totalTime = ((endTime - startTime) / 1000).toFixed(2);
-    const avgTime = (totalTime / clientes.length).toFixed(2);
+    console.log(`\n✨ Proceso completado. Generando Excel...`);
 
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`✨ PROCESO COMPLETADO`);
-    console.log(`${'='.repeat(60)}`);
-    console.log(`📊 Estadísticas:`);
-    console.log(`   Total clientes: ${clientes.length}`);
-    console.log(`   ✅ Exitosos: ${exitosos}`);
-    console.log(`   ❌ Fallidos: ${fallidos}`);
-    console.log(`   ⏱️  Tiempo total: ${totalTime}s`);
-    console.log(`   ⚡ Tiempo promedio: ${avgTime}s por cliente`);
-    console.log(`${'='.repeat(60)}\n`);
+    // ================================
+    // CREAR EXCEL DE SALIDA
+    // ================================
+    const datosExcel = [
+      ['Num de Cliente', 'Nombre del Cliente', 'Facturas Emitidas'],
+      ...resultados.map(r => [r.numCliente, r.nombre, r.facturasEmitidas || 'N/A'])
+    ];
 
-    // Enviar resultados finales
-    res.write(`data: ${JSON.stringify({
-      type: 'complete',
+    const nuevoWorkbook = XLSX.utils.book_new();
+    const nuevaHoja = XLSX.utils.aoa_to_sheet(datosExcel);
+    XLSX.utils.book_append_sheet(nuevoWorkbook, nuevaHoja, 'Resultados');
+
+    // Guardar Excel en /tmp
+    excelPath = path.join('/tmp', `resultados_${Date.now()}.xlsx`);
+    XLSX.writeFile(nuevoWorkbook, excelPath);
+
+    console.log(`📊 Excel generado: ${excelPath}`);
+
+    // Leer archivo como base64
+    const excelBuffer = fs.readFileSync(excelPath);
+    const excelBase64 = excelBuffer.toString('base64');
+
+    // Enviar resultado final con el Excel
+    sendSSE(res, {
+      type: "complete",
       results: resultados,
-      stats: {
-        total: clientes.length,
-        exitosos,
-        fallidos,
-        tiempoTotal: totalTime,
-        tiempoPromedio: avgTime
-      }
-    })}\n\n`);
+      excel: excelBase64,
+      filename: `resultados_afip_${new Date().toISOString().split('T')[0]}.xlsx`
+    });
 
-    // Finalizar conexión SSE
     res.end();
 
+    // Limpiar archivos
+    fs.unlinkSync(req.file.path);
+    fs.unlinkSync(excelPath);
+
+    console.log(`✅ Archivos temporales eliminados`);
+
   } catch (error) {
-    console.error('💥 Error general en el servidor:', error);
-    
-    // Si ya empezamos a enviar SSE, enviar error por ese canal
-    if (res.headersSent) {
-      res.write(`data: ${JSON.stringify({
-        type: 'error',
-        error: error.message
-      })}\n\n`);
-      res.end();
-    } else {
-      // Si no, enviar error JSON normal
-      res.status(500).json({ 
-        error: error.message,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-      });
+    console.error("❌ Error general:", error);
+
+    sendSSE(res, {
+      type: "error",
+      message: error.message,
+    });
+
+    res.end();
+
+    // Limpiar recursos
+    if (browser) {
+      await browser.close();
+    }
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    if (excelPath && fs.existsSync(excelPath)) {
+      fs.unlinkSync(excelPath);
     }
   }
 });
 
-// ============================================
-// ENDPOINT: Health Check
-// ============================================
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    environment: process.env.NODE_ENV || 'development'
-  });
+// ================================
+// INICIO DEL SERVIDOR
+// ================================
+const PORT = process.env.PORT || 10000;
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("╔════════════════════════════════════════════╗");
+  console.log("║   🚀 SERVIDOR INICIADO                    ║");
+  console.log("╚════════════════════════════════════════════╝");
+  console.log(`📍 Puerto: ${PORT}`);
+  console.log(`🌍 URL: http://localhost:${PORT}`);
+  console.log(`🏥 Health: http://localhost:${PORT}/health`);
+  console.log(`📊 API: http://localhost:${PORT}/api/process`);
+  console.log(`✅ Listo para recibir requests`);
 });
-
-// ============================================
-// ENDPOINT: Información del sistema
-// ============================================
-app.get('/', (req, res) => {
-  res.json({
-    name: 'AFIP Automation Backend',
-    version: '1.0.0',
-    endpoints: {
-      health: 'GET /health',
-      process: 'POST /api/process'
-    },
-    status: 'running'
-  });
-});
-
-// ============================================
-// Manejo de errores 404
-// ============================================
-app.use((req, res) => {
-  res.status(404).json({ 
-    error: 'Endpoint no encontrado',
-    path: req.path 
-  });
-});
-
-// ============================================
-// Manejo de errores generales
-// ============================================
-app.use((error, req, res, next) => {
-  console.error('Error no manejado:', error);
-  res.status(500).json({ 
-    error: 'Error interno del servidor',
-    message: error.message,
-    stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-  });
-});
-
-// ============================================
-// Iniciar servidor
-// ============================================
-const PORT = process.env.PORT || 3000;
-const server = app.listen(PORT, () => {
-  console.log(`
-╔════════════════════════════════════════════╗
-║   🚀 SERVIDOR INICIADO                    ║
-╚════════════════════════════════════════════╝
-
-📍 Puerto: ${PORT}
-🌍 URL: http://localhost:${PORT}
-🏥 Health: http://localhost:${PORT}/health
-📊 API: http://localhost:${PORT}/api/process
-🔧 Ambiente: ${process.env.NODE_ENV || 'development'}
-
-✅ Listo para recibir requests
-  `);
-});
-
-// Manejo de cierre graceful
-process.on('SIGTERM', () => {
-  console.log('⚠️  SIGTERM recibido. Cerrando servidor...');
-  server.close(() => {
-    console.log('✓ Servidor cerrado correctamente');
-    process.exit(0);
-  });
-});
-
-process.on('SIGINT', () => {
-  console.log('\n⚠️  SIGINT recibido. Cerrando servidor...');
-  server.close(() => {
-    console.log('✓ Servidor cerrado correctamente');
-    process.exit(0);
-  });
-});
-
-module.exports = app;
