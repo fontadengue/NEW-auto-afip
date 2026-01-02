@@ -11,7 +11,7 @@ export default function AFIPAutomation() {
   const [error, setError] = useState<string | null>(null);
   const [excelData, setExcelData] = useState<{ base64: string; filename: string } | null>(null);
 
-  const BACKEND_URL = import.meta.env.VITE_API_URL || 'https://new-auto-afip.onrender.com';
+  const BACKEND_URL = import.meta.env.VITE_API_URL || 'https://initial-commit-afip-automation-backend.onrender.com';
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFile = e.target.files?.[0];
