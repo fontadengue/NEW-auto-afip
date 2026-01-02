@@ -283,171 +283,213 @@ async function extraerDatos(page, cuit) {
     }
 
     // ============================================
-    // PASO: NAVEGAR DIRECTAMENTE A MONOTRIBUTO
+    // PASO: SETEAR CONTRIBUYENTE Y NAVEGAR A COMPROBANTES EMITIDOS
     // ============================================
-    console.log(`[${cuit}] Navegando a Monotributo...`);
+    console.log(`[${cuit}] Navegando a Setear Contribuyente...`);
 
     let montoFacturas = null;
-    let monotributoPage = null;
+    let comprobantesPage = null;
 
     try {
-      // Crear una nueva pestaña y navegar directamente a Monotributo
-      console.log(`[${cuit}] Abriendo nueva pestaña para Monotributo...`);
-      monotributoPage = await browser.newPage();
-
-      // Configurar la nueva pestaña
-      await monotributoPage.setViewport({ width: 1920, height: 1080 });
-      await monotributoPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-
-      // Navegar a la URL de Monotributo
-      console.log(`[${cuit}] Navegando a https://monotributo.afip.gob.ar/app/Inicio.aspx...`);
-      await monotributoPage.goto('https://monotributo.afip.gob.ar/app/Inicio.aspx', {
-        waitUntil: 'domcontentloaded',
-        timeout: 30000
+      // Usar la página principal (page) para navegar dentro del mismo contexto de sesión
+      // Primero setear contribuyente
+      /* 
+         El usuario indicó: https://fes.afip.gob.ar/mcmp/jsp/setearContribuyente.do?idContribuyente=0
+         Nota: A veces estas URLs abren nuevas pestañas dependiendo de cómo esté configurado el sitio, 
+         pero el usuario indicó "luego dirigirse a este link". 
+         Si el usuario dice "luego dirigirse", asumimos navegación en la misma página o una nueva si el sitio lo fuerza.
+         Vamos a intentar navegar en la página actual ('page') primero, ya que la sesión está ahí.
+      */
+      
+      console.log(`[${cuit}] Navegando a setearContribuyente.do...`);
+      await page.goto('https://fes.afip.gob.ar/mcmp/jsp/setearContribuyente.do?idContribuyente=0', {
+        waitUntil: 'networkidle2',
+        timeout: 45000
       });
+      await sleep(2000);
 
-      console.log(`[${cuit}] ✓ Página de Monotributo cargada`);
-
-      // ESPERAR 45 SEGUNDOS para que cargue completamente el contenido
-      console.log(`[${cuit}] Esperando 45 segundos para que cargue el contenido...`);
-      await sleep(45000);
-
-      console.log(`[${cuit}] Buscando elemento de facturación...`);
-
-      // Intentar múltiples estrategias para encontrar el monto
-      console.log(`[${cuit}] Buscando elemento con el monto de facturas...`);
-
-      // Estrategia 1: Buscar por ID directo
-      montoFacturas = await monotributoPage.evaluate(() => {
-        const elemento = document.querySelector('#spanFacturometroMontoMobile');
-        return elemento ? elemento.textContent.trim() : null;
+      console.log(`[${cuit}] Navegando a comprobantesEmitidos.do...`);
+      await page.goto('https://fes.afip.gob.ar/mcmp/jsp/comprobantesEmitidos.do', {
+        waitUntil: 'networkidle2',
+        timeout: 45000
       });
+      await sleep(3000);
 
-      // Estrategia 2: Si no se encontró, buscar por el div padre y luego el span
-      if (!montoFacturas) {
-        console.log(`[${cuit}] Intentando estrategia alternativa...`);
-        montoFacturas = await monotributoPage.evaluate(() => {
-          const divMonto = document.querySelector('#divMontoFacturadoTextoMobile');
-          if (divMonto) {
-            // Buscar el siguiente elemento que contenga el monto
-            let nextElement = divMonto.nextElementSibling;
-            while (nextElement) {
-              const span = nextElement.querySelector('span[id*="Facturometro"]') ||
-                nextElement.querySelector('span[id*="Monto"]');
-              if (span) {
-                return span.textContent.trim();
+      // ============================================
+      // FILTRAR POR "AÑO PASADO"
+      // ============================================
+      console.log(`[${cuit}] Filtrando por 'Año Pasado'...`);
+      
+      // Click en el input de fecha (fechaEmision)
+      await page.waitForSelector('#fechaEmision', { timeout: 15000 });
+      await page.click('#fechaEmision');
+      await sleep(1000);
+
+      // Click en "Año Pasado"
+      // El selector proporcionado es <li data-range-key="Año Pasado">Año Pasado</li>
+      const selectorAnoPasado = 'li[data-range-key="Año Pasado"]';
+      await page.waitForSelector(selectorAnoPasado, { timeout: 5000 });
+      await page.click(selectorAnoPasado);
+      await sleep(1000);
+
+      // Click en "Buscar": <button type="submit" class="btn btn-primary col-xs-12" id="buscarComprobantes">Buscar</button>
+      console.log(`[${cuit}] Click en Buscar...`);
+      await page.click('#buscarComprobantes');
+      
+      // Esperar a que se actualice la tabla. Puede tardar.
+      await sleep(3000);
+      // Esperar que desaparezca algún loading o aparezca la tabla. 
+      // Asumiremos un sleep generoso y/o esperar selectores de tabla.
+      await page.waitForSelector('#tablaDataTables', { timeout: 30000 });
+
+      // ============================================
+      // CONFIGURAR VISTA DE 50 REGISTROS
+      // ============================================
+      // Click en <i class="fa fa-lg fa-bars"></i> (menú de cantidad de registros?)
+      // El usuario dijo "luego hacer click aqui <i class="fa fa-lg fa-bars"></i>"
+      console.log(`[${cuit}] Configurando vista de 50 registros...`);
+      
+      // A veces este ícono está dentro de un botón. Buscaremos el elemento i con esas clases.
+      await page.click('.fa.fa-lg.fa-bars'); 
+      await sleep(1000);
+
+      // Click en <a href="#">50</a>
+      // Buscamos un enlace que contenga el texto "50"
+      await page.evaluate(() => {
+        const links = Array.from(document.querySelectorAll('a'));
+        const link50 = links.find(a => a.textContent.trim() === '50');
+        if (link50) link50.click();
+      });
+      await sleep(3000); // Esperar que la tabla se redibuje
+
+      // ============================================
+      // ITERAR Y SUMAR
+      // ============================================
+      console.log(`[${cuit}] Comenzando suma de comprobantes...`);
+      
+      let totalFacturacion = 0.0;
+      let hayPaginaSiguiente = true;
+      let paginaActual = 1;
+
+      while (hayPaginaSiguiente) {
+        console.log(`[${cuit}] Procesando página ${paginaActual}...`);
+
+        // Extraer datos de la página actual
+        const { sumaPagina, filasProcesadas } = await page.evaluate(() => {
+          let suma = 0.0;
+          let procesadas = 0;
+          
+          // Seleccionar filas de la tabla (tbody tr)
+          // Asumimos que la tabla tiene id 'tablaDataTables' basado en el botón de paginación mencionado por el usuario
+          // Si no, buscamos la tabla principal.
+          const filas = document.querySelectorAll('#tablaDataTables tbody tr');
+
+          filas.forEach(fila => {
+            // Obtener columnas
+            const cols = fila.querySelectorAll('td');
+            if (cols.length < 2) return; // Fila vacía o header incorrecto
+
+            // Columna Tipo de Comprobante (indices pueden variar, buscamos texto)
+            // El usuario dice: <td>11 - Factura C</td>
+            // Columna Importe: <td class="alignRight"><span class="moneda">$</span>&nbsp;&nbsp;656.212,59</td>
+            
+            const textoFila = fila.innerText;
+            const htmlFila = fila.innerHTML;
+            
+            // Buscar celda de tipo
+            let tipoComprobante = "";
+            let importeTexto = "";
+            
+            // Iteramos celdas para encontrar las que coinciden con los patrones
+            cols.forEach(td => {
+              const texto = td.textContent.trim();
+              if (texto.includes('Factura') || texto.includes('Nota de Crédito') || texto.includes('Recibo')) {
+                tipoComprobante = texto;
               }
-              nextElement = nextElement.nextElementSibling;
-            }
-          }
-          return null;
-        });
-      }
+              // Para el importe, buscamos la clase alignRight y que tenga simbolo moneda o formato numérico
+              if (td.classList.contains('alignRight') && (texto.includes('$') || /[\d.,]+/.test(texto))) {
+                importeTexto = texto;
+              }
+            });
 
-      // Estrategia 3: Buscar cualquier span que contenga "Facturometro" en su ID
-      if (!montoFacturas) {
-        console.log(`[${cuit}] Intentando búsqueda por patrón de ID...`);
-        montoFacturas = await monotributoPage.evaluate(() => {
-          const spans = document.querySelectorAll('span[id*="Facturometro"], span[id*="facturometro"]');
-          for (const span of spans) {
-            const texto = span.textContent.trim();
-            // Verificar que parezca un monto (contiene números y comas/puntos)
-            if (texto && /[\d.,]+/.test(texto)) {
-              return texto;
-            }
-          }
-          return null;
-        });
-      }
+            if (tipoComprobante && importeTexto) {
+              // Limpiar importe: sacar $ y espacios, reemplazar puntos por nada y coma por punto (formato español)
+              // 656.212,59 -> 656212.59
+              const importeLimpio = importeTexto
+                .replace('$', '')
+                .replace(/\./g, '') // Quitar puntos de miles
+                .replace(',', '.')  // Cambiar coma decimal por punto
+                .trim();
+              
+              const importe = parseFloat(importeLimpio);
 
-      // Estrategia 4: Buscar por texto visible que contenga "Monto facturado"
-      if (!montoFacturas) {
-        console.log(`[${cuit}] Intentando búsqueda por texto visible...`);
-        montoFacturas = await monotributoPage.evaluate(() => {
-          const elementos = Array.from(document.querySelectorAll('*'));
-          for (const el of elementos) {
-            if (el.textContent.includes('Monto facturado')) {
-              // Buscar el siguiente elemento con números
-              let next = el.nextElementSibling;
-              while (next) {
-                const texto = next.textContent.trim();
-                if (/^\$?\s*[\d.,]+$/.test(texto)) {
-                  return texto;
+              if (!isNaN(importe)) {
+                if (tipoComprobante.includes('Factura') || tipoComprobante.includes('Recibo')) {
+                  suma += importe;
+                } else if (tipoComprobante.includes('Nota de Crédito')) {
+                  suma -= importe;
                 }
-                // También buscar dentro del elemento
-                const spanConMonto = next.querySelector('span');
-                if (spanConMonto) {
-                  const textoSpan = spanConMonto.textContent.trim();
-                  if (/[\d.,]+/.test(textoSpan)) {
-                    return textoSpan;
-                  }
-                }
-                next = next.nextElementSibling;
+                procesadas++;
               }
             }
-          }
-          return null;
-        });
-      }
-
-      if (montoFacturas) {
-        console.log(`[${cuit}] ✓ Facturas Emitidas extraídas: ${montoFacturas}`);
-      } else {
-        console.warn(`[${cuit}] ⚠ No se pudo encontrar el monto de facturas`);
-
-        // Tomar screenshot para debugging
-        try {
-          await monotributoPage.screenshot({
-            path: `monotributo_${cuit}_${Date.now()}.png`,
-            fullPage: true
           });
-          console.log(`[${cuit}] Screenshot guardado para debugging`);
-        } catch (e) {
-          console.error(`[${cuit}] No se pudo tomar screenshot:`, e.message);
-        }
 
-        // Guardar HTML para análisis
-        try {
-          const html = await monotributoPage.content();
-          const fs = require('fs');
-          fs.writeFileSync(`monotributo_${cuit}_${Date.now()}.html`, html);
-          console.log(`[${cuit}] HTML guardado para debugging`);
-        } catch (e) {
-          console.error(`[${cuit}] No se pudo guardar HTML:`, e.message);
+          return { sumaPagina: suma, filasProcesadas: procesadas };
+        });
+
+        totalFacturacion += sumaPagina;
+        console.log(`[${cuit}] Página ${paginaActual}: procesadas ${filasProcesadas} filas. Subtotal acumulado: ${totalFacturacion.toLocaleString('es-AR')}`);
+
+        // Verificar botón siguiente
+        // <a href="#" aria-controls="tablaDataTables" data-dt-idx="5" tabindex="0">»</a>
+        // El usuario dice: "cuando termine de sumar en la ultima pagina y el boton de pagina siguiente no deje hacer click"
+        // Normalmente DataTables añade clase "disabled" al li padre del link, o al link mismo.
+        
+        const existeSiguiente = await page.evaluate(() => {
+          // Buscar todos los botones de paginación y encontrar el que tiene "»"
+          const botones = Array.from(document.querySelectorAll('.paginate_button, .pagination a, li a'));
+          const btnSiguiente = botones.find(b => b.textContent.trim() === '»');
+          
+          if (!btnSiguiente) return false;
+          
+          // Verificar si está habilitado
+          // DataTables suele poner clase disabled en el <li> padre o en el <a>
+          const parentLi = btnSiguiente.closest('li');
+          if (parentLi && parentLi.classList.contains('disabled')) return false;
+          if (btnSiguiente.classList.contains('disabled')) return false;
+          
+          // Si no está disabled, hacer click y devolver true
+          btnSiguiente.click();
+          return true;
+        });
+
+        if (existeSiguiente) {
+          paginaActual++;
+          await sleep(2000); // Esperar carga de siguiente página
+        } else {
+          hayPaginaSiguiente = false;
         }
       }
 
-      // Cerrar la pestaña de Monotributo
-      if (monotributoPage) {
-        await monotributoPage.close();
-        console.log(`[${cuit}] Pestaña de Monotributo cerrada`);
-      }
+      // Formatear total final
+      montoFacturas = totalFacturacion.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      console.log(`[${cuit}] ✓ Cálculo finalizado. Total Facturación: ${montoFacturas}`);
 
     } catch (error) {
-      console.error(`[${cuit}] ⚠ Error extrayendo datos de Monotributo:`, error.message);
-
-      // Intentar cerrar la pestaña de Monotributo si se abrió
-      try {
-        if (monotributoPage) {
-          await monotributoPage.close();
-          console.log(`[${cuit}] Pestaña de Monotributo cerrada después de error`);
-        }
-      } catch (e) {
-        // Ignorar errores al cerrar pestañas
-      }
-
+      console.error(`[${cuit}] ⚠ Error calculando facturación:`, error.message);
+      
       // Tomar screenshot del error
       try {
         await page.screenshot({
-          path: `error_monotributo_${cuit}_${Date.now()}.png`,
+          path: `error_calculo_${cuit}_${Date.now()}.png`,
           fullPage: true
         });
       } catch (e) {
         // Ignorar errores al tomar screenshot
       }
-
+      
       // No lanzamos el error, solo registramos y continuamos
-      montoFacturas = 'Error al extraer';
+      montoFacturas = 'Error al calcular';
     }
 
     const datosExtraidos = {
