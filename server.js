@@ -36,186 +36,12 @@ function sendSSE(res, data) {
 // ================================
 // FUNCIÓN HELPER: SLEEP
 // ================================
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+const { procesarClienteAFIP, sleep } = require('./scraper');
 
 // ================================
-// FUNCIÓN: PROCESAR UN CLIENTE EN AFIP
+// FUNCIÓN: PROCESAR UN CLIENTE EN AFIP (WRAPPER)
 // ================================
-async function procesarClienteAFIP(page, cuit, clave) {
-  try {
-    console.log(`  → Navegando a login de AFIP...`);
 
-    // 1. IR A LA PÁGINA DE LOGIN
-    await page.goto('https://auth.afip.gob.ar/contribuyente_/login.xhtml', {
-      waitUntil: 'networkidle2',
-      timeout: 30000
-    });
-
-    await sleep(1000);
-
-    // 2. INGRESAR CUIT
-    console.log(`  → Ingresando CUIT: ${cuit}`);
-
-    await page.waitForSelector('#F1\\:username', { timeout: 10000 });
-    await page.click('#F1\\:username');
-    await sleep(300);
-    await page.type('#F1\\:username', cuit, { delay: 100 });
-
-    // 3. CLICK EN SIGUIENTE
-    console.log(`  → Click en Siguiente...`);
-
-    await sleep(500);
-    await page.click('#F1\\:btnSiguiente');
-    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
-
-    // 4. INGRESAR CONTRASEÑA
-    console.log(`  → Ingresando contraseña...`);
-
-    await page.waitForSelector('#F1\\:password', { timeout: 10000 });
-    await page.click('#F1\\:password');
-    await sleep(300);
-    await page.type('#F1\\:password', clave, { delay: 100 });
-
-    // 5. CLICK EN INGRESAR
-    console.log(`  → Click en Ingresar...`);
-
-    await sleep(500);
-    await page.click('#F1\\:btnIngresar');
-    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
-
-    // 6. ESPERAR A QUE CARGUE EL DASHBOARD
-    await sleep(2000);
-
-    // 7. EXTRAER EL NOMBRE DEL CONTRIBUYENTE
-    console.log(`  → Extrayendo nombre del contribuyente...`);
-
-    await page.waitForSelector('strong.text-primary', { timeout: 10000 });
-    const nombre = await page.$eval('strong.text-primary', el => el.textContent.trim());
-
-    console.log(`  ✓ Nombre extraído: ${nombre}`);
-
-    // ============================================
-    // 8. NAVEGAR A MONOTRIBUTO Y EXTRAER FACTURACIÓN
-    // ============================================
-    console.log(`  → Navegando a sección de Monotributo...`);
-
-    let facturasEmitidas = null;
-
-    try {
-      // Navegar directamente a la URL de Monotributo
-      await page.goto('https://monotributo.afip.gob.ar/app/Admin/Inicio.aspx', {
-        waitUntil: 'networkidle2',
-        timeout: 30000
-      });
-
-      console.log(`  → Página de Monotributo cargada`);
-
-      // Esperar 20 segundos para que la página cargue completamente
-      console.log(`  → Esperando 20 segundos para que cargue el contenido...`);
-      await sleep(20000);
-
-      // Intentar encontrar el elemento con diferentes estrategias
-      console.log(`  → Buscando elemento de facturación...`);
-
-      // Estrategia 1: Buscar por ID exacto
-      let elementoEncontrado = await page.$('#spanFacturometroMontoMobile');
-
-      if (!elementoEncontrado) {
-        console.log(`  → Elemento #spanFacturometroMontoMobile no encontrado, buscando alternativas...`);
-
-        // Estrategia 2: Buscar cualquier span que contenga "Facturometro" o "Monto"
-        elementoEncontrado = await page.$('[id*="Facturometro"]');
-
-        if (!elementoEncontrado) {
-          // Estrategia 3: Inspeccionar el HTML para debugging
-          console.log(`  → Inspeccionando HTML de la página...`);
-          const htmlSnippet = await page.evaluate(() => {
-            // Buscar elementos que puedan contener el monto
-            const posiblesElementos = document.querySelectorAll('span[id*="span"], span[id*="monto"], span[id*="Monto"]');
-            const resultados = [];
-            posiblesElementos.forEach(el => {
-              if (el.id) {
-                resultados.push(`ID: ${el.id}, Texto: ${el.textContent.trim().substring(0, 50)}`);
-              }
-            });
-            return resultados.slice(0, 10); // Primeros 10 elementos
-          });
-
-          console.log(`  → Elementos encontrados en la página:`, htmlSnippet);
-
-          // Tomar screenshot para debugging
-          try {
-            await page.screenshot({
-              path: `/tmp/monotributo_debug_${Date.now()}.png`,
-              fullPage: true
-            });
-            console.log(`  → Screenshot guardado para debugging`);
-          } catch (e) {
-            console.log(`  → No se pudo guardar screenshot`);
-          }
-        }
-      }
-
-      // Extraer el valor
-      facturasEmitidas = await page.evaluate(() => {
-        // Intentar múltiples selectores
-        const selectores = [
-          '#spanFacturometroMontoMobile',
-          '#spanFacturometroMonto',
-          '[id*="FacturometroMonto"]',
-          '[id*="facturometro"]'
-        ];
-
-        for (const selector of selectores) {
-          const elemento = document.querySelector(selector);
-          if (elemento && elemento.textContent.trim()) {
-            return elemento.textContent.trim();
-          }
-        }
-
-        return null;
-      });
-
-      if (facturasEmitidas) {
-        console.log(`  ✓ Facturas Emitidas extraídas: ${facturasEmitidas}`);
-      } else {
-        console.warn(`  ⚠ No se pudo encontrar el monto de facturas en ningún selector`);
-        facturasEmitidas = 'No encontrado';
-      }
-
-    } catch (error) {
-      console.error(`  ⚠ Error extrayendo datos de Monotributo:`, error.message);
-
-      // Intentar tomar screenshot del error
-      try {
-        await page.screenshot({
-          path: `/tmp/monotributo_error_${Date.now()}.png`,
-          fullPage: true
-        });
-        console.log(`  → Screenshot de error guardado`);
-      } catch (e) {
-        // Ignorar si no se puede tomar screenshot
-      }
-
-      facturasEmitidas = 'Error al extraer';
-    }
-
-    return {
-      success: true,
-      nombre: nombre,
-      facturasEmitidas: facturasEmitidas
-    };
-
-  } catch (error) {
-    console.error(`  ✗ Error: ${error.message}`);
-    return {
-      success: false,
-      error: error.message
-    };
-  }
-}
 
 // ================================
 // RUTA PRINCIPAL: /api/process
@@ -284,47 +110,27 @@ app.post("/api/process", upload.single("excel"), async (req, res) => {
       });
 
       // ABRIR NAVEGADOR NUEVO PARA ESTE CLIENTE
-      console.log(`  🚀 Abriendo navegador nuevo...`);
-      browser = await puppeteer.launch({
-        headless: true,
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-gpu",
-          "--disable-dev-shm-usage",
-          "--no-zygote",
-          "--single-process"
-        ],
-        executablePath: "/usr/bin/chromium"
-      });
+      // Procesar cliente usando el módulo externo (que maneja su propio browser)
+      try {
+        const resultado = await procesarClienteAFIP(CUIT, CLAVE);
 
-      const page = await browser.newPage();
-      await page.setViewport({ width: 1920, height: 1080 });
-      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-
-      // Procesar cliente en AFIP
-      const resultado = await procesarClienteAFIP(page, CUIT, CLAVE);
-
-      if (resultado.success) {
+        // Adaptar respuesta del nuevo scraper al formato esperado aquí
         resultados.push({
           numCliente: NUM_CLIENTE,
           nombre: resultado.nombre,
           facturasEmitidas: resultado.facturasEmitidas
         });
         console.log(`✅ [${i + 1}/${total}] Procesado exitosamente`);
-      } else {
+
+      } catch (error) {
+        console.error(`❌ [${i + 1}/${total}] Error al procesar:`, error.message);
+
         resultados.push({
           numCliente: NUM_CLIENTE,
-          nombre: `ERROR: ${resultado.error}`,
+          nombre: `ERROR: ${error.message}`,
           facturasEmitidas: 'N/A'
         });
-        console.log(`❌ [${i + 1}/${total}] Error al procesar`);
       }
-
-      // CERRAR NAVEGADOR DESPUÉS DE PROCESAR ESTE CLIENTE
-      console.log(`  🔒 Cerrando navegador...`);
-      await browser.close();
-      browser = null;
 
       // Espera entre clientes para simular comportamiento humano
       if (i < dataRows.length - 1) {
@@ -332,6 +138,8 @@ app.post("/api/process", upload.single("excel"), async (req, res) => {
         console.log(`⏳ Esperando ${(espera / 1000).toFixed(1)}s antes del siguiente cliente...`);
         await sleep(espera);
       }
+
+
     }
 
     console.log(`\n✨ Proceso completado. Generando Excel...`);
