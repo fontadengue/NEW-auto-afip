@@ -1,6 +1,6 @@
 FROM node:18-slim
 
-# Instalar dependencias del sistema para Puppeteer
+# Instalar Chromium y dependencias del sistema
 RUN apt-get update && apt-get install -y \
     chromium \
     ca-certificates \
@@ -37,25 +37,32 @@ RUN apt-get update && apt-get install -y \
     libxtst6 \
     xdg-utils \
     wget \
-    --no-install-recommends
+    --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+# Variable de entorno para que Puppeteer use Chromium del sistema
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 WORKDIR /app
 
-# Copiamos solo package.json y package-lock.json primero
+# Copiar package.json
 COPY package*.json ./
 
-# Ahora sí instalamos dependencias
+# Instalar dependencias de Node (sin descargar Chrome)
 RUN npm install
 
-# Ahora copiamos el resto del proyecto
+# Copiar resto del código
 COPY . .
 
-# Crear usuario pptruser (esto lo tenías bien)
+# Crear usuario no-root para seguridad
 RUN groupadd -r pptruser && useradd -r -g pptruser -G audio,video pptruser \
- && mkdir -p /home/pptruser/Downloads \
- && chown -R pptruser:pptruser /home/pptruser \
- && chown -R pptruser:pptruser /app
+    && mkdir -p /home/pptruser/Downloads \
+    && chown -R pptruser:pptruser /home/pptruser \
+    && chown -R pptruser:pptruser /app
 
 USER pptruser
+
+EXPOSE 3000
 
 CMD ["npm", "start"]
