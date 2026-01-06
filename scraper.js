@@ -1,4 +1,67 @@
 const puppeteer = require('puppeteer');
+const path = require('path');
+const fs = require('fs');
+
+/**
+ * Encuentra el ejecutable de Chrome en diferentes ubicaciones
+ */
+function findChromeExecutable() {
+  // Prioridad 1: Variable de entorno (Docker)
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    const envPath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    if (fs.existsSync(envPath)) {
+      console.log(`✓ Chrome encontrado en variable de entorno: ${envPath}`);
+      return envPath;
+    }
+  }
+
+  const possiblePaths = [
+    // Ubicación de puppeteer.executablePath()
+    puppeteer.executablePath?.(),
+    // Chromium del sistema (común en Docker y Linux)
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    // Ubicación en .cache (nueva estructura)
+    path.join(__dirname, '.cache', 'puppeteer', 'chrome'),
+    path.join(__dirname, 'node_modules', 'puppeteer', '.local-chromium'),
+    // Ubicaciones comunes en Linux
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    // Ubicaciones comunes en Windows
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    // Ubicaciones comunes en Mac
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+  ].filter(Boolean);
+
+  for (const chromePath of possiblePaths) {
+    if (fs.existsSync(chromePath)) {
+      console.log(`✓ Chrome encontrado en: ${chromePath}`);
+      return chromePath;
+    }
+    
+    // Si es un directorio, buscar el ejecutable dentro
+    try {
+      if (fs.statSync(chromePath).isDirectory()) {
+        const files = fs.readdirSync(chromePath, { recursive: true });
+        const executable = files.find(f => 
+          f.includes('chrome') || f.includes('chromium')
+        );
+        if (executable) {
+          const fullPath = path.join(chromePath, executable);
+          if (fs.existsSync(fullPath)) {
+            console.log(`✓ Chrome encontrado en: ${fullPath}`);
+            return fullPath;
+          }
+        }
+      }
+    } catch (e) {
+      // Ignorar errores de lectura de directorio
+    }
+  }
+
+  return null;
+}
 
 /**
  * Función principal para procesar un cliente en AFIP/ARCA
@@ -10,9 +73,21 @@ async function procesarClienteAFIP(cuit, clave) {
   let browser = null;
 
   try {
+    // Buscar Chrome
+    const chromeExecutable = findChromeExecutable();
+    
+    if (!chromeExecutable) {
+      throw new Error(
+        '❌ No se encontró Chrome/Chromium instalado.\n' +
+        'Por favor ejecuta: npm run install-chrome\n' +
+        'O manualmente: npx puppeteer browsers install chrome'
+      );
+    }
+
     // Configuración del navegador
     browser = await puppeteer.launch({
       headless: process.env.PUPPETEER_HEADLESS !== 'false', // Cambiar a false para debugging
+      executablePath: chromeExecutable, // Usar el Chrome encontrado
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
