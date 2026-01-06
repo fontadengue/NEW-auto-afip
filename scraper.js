@@ -208,30 +208,13 @@ async function procesarClienteAFIP(cuit, clave) {
     // ============================================
     // PASO 5: NAVEGAR A LA SECCIÓN ESPECÍFICA
     // ============================================
-    // AQUÍ ES DONDE VAS A INDICARME QUÉ HACER
-    // Por ahora dejo placeholders comentados con ejemplos
-
     console.log(`[${cuit}] Navegando a sección objetivo...`);
-
-    // Ejemplo 1: Si necesitas ir a una URL específica
-    // await page.goto('https://auth.afip.gob.ar/contribuyente/admin/administrar.xhtml', {
-    //   waitUntil: 'networkidle2'
-    // });
-
-    // Ejemplo 2: Si necesitas hacer click en un menú
-    // await page.click('a[href*="padron"]');
-    // await page.waitForSelector('.datos-contribuyente');
-
-    // Ejemplo 3: Si necesitas esperar que cargue algo específico
-    // await page.waitForSelector('#datosGenerales', { timeout: 10000 });
 
     await sleep(2000); // Espera de seguridad
 
     // ============================================
     // PASO 6: EXTRAER DATOS
     // ============================================
-    // AQUÍ EXTRAEREMOS LOS DATOS QUE ME INDIQUES
-
     console.log(`[${cuit}] Extrayendo datos...`);
 
     const datosExtraidos = await extraerDatos(page, cuit);
@@ -282,7 +265,6 @@ async function verificarLoginExitoso(page) {
     }
 
     // Verificación 2: Buscar elementos que indican login exitoso
-    // Ajusta estos selectores según la página real de AFIP
     const elementosExitosos = [
       'a[href*="logout"]',
       '.usuario-logueado',
@@ -299,33 +281,6 @@ async function verificarLoginExitoso(page) {
       }
     }
 
-    // Verificación 3: Buscar mensajes de error
-    const mensajesError = await page.evaluate(() => {
-      const errores = [];
-      const posiblesErrores = [
-        '.error-message',
-        '.alert-danger',
-        '.mensaje-error',
-        '[class*="error"]'
-      ];
-
-      posiblesErrores.forEach(selector => {
-        const elementos = document.querySelectorAll(selector);
-        elementos.forEach(el => {
-          if (el.textContent.trim().length > 0) {
-            errores.push(el.textContent.trim());
-          }
-        });
-      });
-
-      return errores;
-    });
-
-    if (mensajesError.length > 0) {
-      console.log(`Mensajes de error encontrados: ${mensajesError.join(', ')}`);
-      return false;
-    }
-
     // Si llegamos aquí y la URL cambió, asumimos que el login fue exitoso
     return !urlActual.includes('login');
 
@@ -340,42 +295,42 @@ async function verificarLoginExitoso(page) {
  */
 async function extraerDatos(page, cuit) {
   try {
-    console.log(`[${cuit}] Extrayendo nombre del usuario...`);
+    let nombreUsuario = 'No disponible';
+    let montoFacturas = 'No calculado';
 
-    // Esperar a que la página esté completamente cargada
-    await sleep(2000);
+    // ============================================
+    // EXTRAER NOMBRE DEL USUARIO
+    // ============================================
+    try {
+      console.log(`[${cuit}] Extrayendo nombre del usuario...`);
+      
+      const posiblesSelectoresNombre = [
+        '.usuario-logueado',
+        '.navbar-user',
+        '[class*="usuario"]',
+        '[class*="nombre"]'
+      ];
 
-    // Extraer el nombre del usuario desde el elemento <strong class="text-primary">
-    const nombreUsuario = await page.evaluate(() => {
-      const elemento = document.querySelector('strong.text-primary');
-      return elemento ? elemento.textContent.trim() : null;
-    });
+      for (const selector of posiblesSelectoresNombre) {
+        const nombre = await getTextSafe(page, selector);
+        if (nombre) {
+          nombreUsuario = nombre;
+          console.log(`[${cuit}] Nombre encontrado: ${nombreUsuario}`);
+          break;
+        }
+      }
 
-    if (!nombreUsuario) {
-      console.warn(`[${cuit}] No se pudo encontrar el nombre del usuario`);
-    } else {
-      console.log(`[${cuit}] Nombre extraído: ${nombreUsuario}`);
+      if (nombreUsuario === 'No disponible') {
+        console.log(`[${cuit}] No se pudo encontrar el nombre del usuario`);
+      }
+    } catch (error) {
+      console.error(`[${cuit}] Error extrayendo nombre:`, error.message);
     }
 
     // ============================================
-    // PASO: SETEAR CONTRIBUYENTE Y NAVEGAR A COMPROBANTES EMITIDOS
+    // CALCULAR FACTURACIÓN
     // ============================================
-    console.log(`[${cuit}] Navegando a Setear Contribuyente...`);
-
-    let montoFacturas = null;
-    let comprobantesPage = null;
-
     try {
-      // Usar la página principal (page) para navegar dentro del mismo contexto de sesión
-      // Primero setear contribuyente
-      /* 
-         El usuario indicó: https://fes.afip.gob.ar/mcmp/jsp/setearContribuyente.do?idContribuyente=0
-         Nota: A veces estas URLs abren nuevas pestañas dependiendo de cómo esté configurado el sitio, 
-         pero el usuario indicó "luego dirigirse a este link". 
-         Si el usuario dice "luego dirigirse", asumimos navegación en la misma página o una nueva si el sitio lo fuerza.
-         Vamos a intentar navegar en la página actual ('page') primero, ya que la sesión está ahí.
-      */
-      
       console.log(`[${cuit}] Navegando a setearContribuyente.do...`);
       await page.goto('https://fes.afip.gob.ar/mcmp/jsp/setearContribuyente.do?idContribuyente=0', {
         waitUntil: 'networkidle2',
@@ -395,41 +350,36 @@ async function extraerDatos(page, cuit) {
       // ============================================
       console.log(`[${cuit}] Filtrando por 'Año Pasado'...`);
       
-      // Click en el input de fecha (fechaEmision)
-      await page.waitForSelector('#fechaEmision', { timeout: 15000 });
+      // Click en: <input type="text" class="form-control" id="fechaEmision" required="">
+      console.log(`[${cuit}] Haciendo click en #fechaEmision...`);
+      await page.waitForSelector('#fechaEmision', { visible: true, timeout: 15000 });
       await page.click('#fechaEmision');
-      await sleep(1000);
-
-      // Click en "Año Pasado"
-      // El selector proporcionado es <li data-range-key="Año Pasado">Año Pasado</li>
-      const selectorAnoPasado = 'li[data-range-key="Año Pasado"]';
-      await page.waitForSelector(selectorAnoPasado, { timeout: 5000 });
-      await page.click(selectorAnoPasado);
+      await sleep(1500);
+      
+      // Click en: <li data-range-key="Año Pasado" class="active">Año Pasado</li>
+      console.log(`[${cuit}] Haciendo click en "Año Pasado"...`);
+      await page.waitForSelector('li[data-range-key="Año Pasado"]', { visible: true, timeout: 5000 });
+      await page.click('li[data-range-key="Año Pasado"]');
       await sleep(1000);
 
       // Click en "Buscar": <button type="submit" class="btn btn-primary col-xs-12" id="buscarComprobantes">Buscar</button>
       console.log(`[${cuit}] Click en Buscar...`);
       await page.click('#buscarComprobantes');
       
-      // Esperar a que se actualice la tabla. Puede tardar.
+      // Esperar a que se actualice la tabla
       await sleep(3000);
-      // Esperar que desaparezca algún loading o aparezca la tabla. 
-      // Asumiremos un sleep generoso y/o esperar selectores de tabla.
       await page.waitForSelector('#tablaDataTables', { timeout: 30000 });
 
       // ============================================
       // CONFIGURAR VISTA DE 50 REGISTROS
       // ============================================
-      // Click en <i class="fa fa-lg fa-bars"></i> (menú de cantidad de registros?)
-      // El usuario dijo "luego hacer click aqui <i class="fa fa-lg fa-bars"></i>"
       console.log(`[${cuit}] Configurando vista de 50 registros...`);
       
-      // A veces este ícono está dentro de un botón. Buscaremos el elemento i con esas clases.
+      // Click en <i class="fa fa-lg fa-bars"></i>
       await page.click('.fa.fa-lg.fa-bars'); 
       await sleep(1000);
 
       // Click en <a href="#">50</a>
-      // Buscamos un enlace que contenga el texto "50"
       await page.evaluate(() => {
         const links = Array.from(document.querySelectorAll('a'));
         const link50 = links.find(a => a.textContent.trim() === '50');
@@ -454,46 +404,30 @@ async function extraerDatos(page, cuit) {
           let suma = 0.0;
           let procesadas = 0;
           
-          // Seleccionar filas de la tabla (tbody tr)
-          // Asumimos que la tabla tiene id 'tablaDataTables' basado en el botón de paginación mencionado por el usuario
-          // Si no, buscamos la tabla principal.
           const filas = document.querySelectorAll('#tablaDataTables tbody tr');
 
           filas.forEach(fila => {
-            // Obtener columnas
             const cols = fila.querySelectorAll('td');
-            if (cols.length < 2) return; // Fila vacía o header incorrecto
+            if (cols.length < 2) return;
 
-            // Columna Tipo de Comprobante (indices pueden variar, buscamos texto)
-            // El usuario dice: <td>11 - Factura C</td>
-            // Columna Importe: <td class="alignRight"><span class="moneda">$</span>&nbsp;&nbsp;656.212,59</td>
-            
-            const textoFila = fila.innerText;
-            const htmlFila = fila.innerHTML;
-            
-            // Buscar celda de tipo
             let tipoComprobante = "";
             let importeTexto = "";
             
-            // Iteramos celdas para encontrar las que coinciden con los patrones
             cols.forEach(td => {
               const texto = td.textContent.trim();
               if (texto.includes('Factura') || texto.includes('Nota de Crédito') || texto.includes('Recibo')) {
                 tipoComprobante = texto;
               }
-              // Para el importe, buscamos la clase alignRight y que tenga simbolo moneda o formato numérico
               if (td.classList.contains('alignRight') && (texto.includes('$') || /[\d.,]+/.test(texto))) {
                 importeTexto = texto;
               }
             });
 
             if (tipoComprobante && importeTexto) {
-              // Limpiar importe: sacar $ y espacios, reemplazar puntos por nada y coma por punto (formato español)
-              // 656.212,59 -> 656212.59
               const importeLimpio = importeTexto
                 .replace('$', '')
-                .replace(/\./g, '') // Quitar puntos de miles
-                .replace(',', '.')  // Cambiar coma decimal por punto
+                .replace(/\./g, '')
+                .replace(',', '.')
                 .trim();
               
               const importe = parseFloat(importeLimpio);
@@ -516,37 +450,28 @@ async function extraerDatos(page, cuit) {
         console.log(`[${cuit}] Página ${paginaActual}: procesadas ${filasProcesadas} filas. Subtotal acumulado: ${totalFacturacion.toLocaleString('es-AR')}`);
 
         // Verificar botón siguiente
-        // <a href="#" aria-controls="tablaDataTables" data-dt-idx="5" tabindex="0">»</a>
-        // El usuario dice: "cuando termine de sumar en la ultima pagina y el boton de pagina siguiente no deje hacer click"
-        // Normalmente DataTables añade clase "disabled" al li padre del link, o al link mismo.
-        
         const existeSiguiente = await page.evaluate(() => {
-          // Buscar todos los botones de paginación y encontrar el que tiene "»"
           const botones = Array.from(document.querySelectorAll('.paginate_button, .pagination a, li a'));
           const btnSiguiente = botones.find(b => b.textContent.trim() === '»');
           
           if (!btnSiguiente) return false;
           
-          // Verificar si está habilitado
-          // DataTables suele poner clase disabled en el <li> padre o en el <a>
           const parentLi = btnSiguiente.closest('li');
           if (parentLi && parentLi.classList.contains('disabled')) return false;
           if (btnSiguiente.classList.contains('disabled')) return false;
           
-          // Si no está disabled, hacer click y devolver true
           btnSiguiente.click();
           return true;
         });
 
         if (existeSiguiente) {
           paginaActual++;
-          await sleep(2000); // Esperar carga de siguiente página
+          await sleep(2000);
         } else {
           hayPaginaSiguiente = false;
         }
       }
 
-      // Formatear total final
       montoFacturas = totalFacturacion.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       console.log(`[${cuit}] ✓ Cálculo finalizado. Total Facturación: ${montoFacturas}`);
 
@@ -556,14 +481,13 @@ async function extraerDatos(page, cuit) {
       // Tomar screenshot del error
       try {
         await page.screenshot({
-          path: `error_calculo_${cuit}_${Date.now()}.png`,
+          path: `/app/error_calculo_${cuit}_${Date.now()}.png`,
           fullPage: true
         });
       } catch (e) {
         // Ignorar errores al tomar screenshot
       }
       
-      // No lanzamos el error, solo registramos y continuamos
       montoFacturas = 'Error al calcular';
     }
 
@@ -586,7 +510,6 @@ async function extraerDatos(page, cuit) {
 
 /**
  * Utilidad para esperar un tiempo (simular comportamiento humano)
- * @param {number} ms - Milisegundos a esperar
  */
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
