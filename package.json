@@ -5,7 +5,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "postinstall": "node install-chrome.js",
+    "postinstall": "node install-chrome.js || true",
     "install-chrome": "node install-chrome.js"
   },
   "dependencies": {
