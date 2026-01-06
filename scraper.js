@@ -343,17 +343,154 @@ async function extraerDatos(page, cuit) {
         waitUntil: 'networkidle2',
         timeout: 45000
       });
-      await sleep(3000);
+      await sleep(5000); // Aumentar tiempo de espera
+
+      // ============================================
+      // DIAGNOSTICAR LA PÁGINA
+      // ============================================
+      console.log(`[${cuit}] Diagnosticando página...`);
+      
+      const diagnostico = await page.evaluate(() => {
+        return {
+          url: window.location.href,
+          title: document.title,
+          // Buscar todos los inputs
+          todosLosInputs: Array.from(document.querySelectorAll('input')).map(i => ({
+            id: i.id,
+            name: i.name,
+            type: i.type,
+            class: i.className,
+            visible: i.offsetParent !== null
+          })),
+          // Buscar específicamente fechaEmision
+          fechaEmisionExiste: !!document.querySelector('#fechaEmision'),
+          fechaEmisionVisible: document.querySelector('#fechaEmision')?.offsetParent !== null,
+          // Buscar elementos con "fecha" en el id
+          elementosConFecha: Array.from(document.querySelectorAll('[id*="fecha"], [name*="fecha"]')).map(e => ({
+            tag: e.tagName,
+            id: e.id,
+            name: e.getAttribute('name'),
+            class: e.className
+          })),
+          // Ver si hay algún formulario
+          formularios: Array.from(document.querySelectorAll('form')).map(f => ({
+            id: f.id,
+            name: f.name,
+            action: f.action
+          })),
+          // HTML de los primeros inputs de texto
+          htmlInputsTexto: Array.from(document.querySelectorAll('input[type="text"]'))
+            .slice(0, 5)
+            .map(i => i.outerHTML)
+        };
+      });
+      
+      console.log(`[${cuit}] 📊 DIAGNÓSTICO COMPLETO:`);
+      console.log(JSON.stringify(diagnostico, null, 2));
+      
+      // Tomar screenshot para ver visualmente
+      try {
+        await page.screenshot({
+          path: `/app/diagnostico_${cuit}_${Date.now()}.png`,
+          fullPage: true
+        });
+        console.log(`[${cuit}] 📸 Screenshot guardado`);
+      } catch (e) {
+        console.log(`[${cuit}] ⚠️  No se pudo guardar screenshot`);
+      }
 
       // ============================================
       // FILTRAR POR "AÑO PASADO"
       // ============================================
       console.log(`[${cuit}] Filtrando por 'Año Pasado'...`);
       
+      // Intentar esperar a que el formulario esté completamente cargado
+      await sleep(2000);
+      
       // Click en: <input type="text" class="form-control" id="fechaEmision" required="">
+      console.log(`[${cuit}] Buscando selector #fechaEmision...`);
+      
+      // Verificar si existe primero
+      const fechaEmisionExiste = await page.evaluate(() => {
+        const input = document.querySelector('#fechaEmision');
+        return {
+          existe: !!input,
+          visible: input ? input.offsetParent !== null : false,
+          disabled: input ? input.disabled : null,
+          readonly: input ? input.readOnly : null,
+          html: input ? input.outerHTML : null
+        };
+      });
+      
+      console.log(`[${cuit}] Estado de #fechaEmision:`, JSON.stringify(fechaEmisionExiste, null, 2));
+      
+      if (!fechaEmisionExiste.existe) {
+        // Si no existe, buscar alternativas
+        console.log(`[${cuit}] ⚠️  #fechaEmision NO EXISTE. Buscando alternativas...`);
+        
+        const alternativas = await page.evaluate(() => {
+          const inputs = Array.from(document.querySelectorAll('input[type="text"].form-control'));
+          return inputs.map(i => ({
+            id: i.id,
+            name: i.name,
+            class: i.className,
+            placeholder: i.placeholder,
+            html: i.outerHTML.substring(0, 200)
+          }));
+        });
+        
+        console.log(`[${cuit}] Inputs alternativos:`, JSON.stringify(alternativas, null, 2));
+        
+        throw new Error('El selector #fechaEmision no existe en la página. Ver logs de diagnóstico.');
+      }
+      
+      if (!fechaEmisionExiste.visible) {
+        console.log(`[${cuit}] ⚠️  #fechaEmision existe pero NO ES VISIBLE`);
+      }
+      
+      // Intentar hacer click
       console.log(`[${cuit}] Haciendo click en #fechaEmision...`);
-      await page.waitForSelector('#fechaEmision', { visible: true, timeout: 15000 });
-      await page.click('#fechaEmision');
+      
+      try {
+        await page.waitForSelector('#fechaEmision', { 
+          visible: true, 
+          timeout: 20000 
+        });
+        
+        // Hacer scroll hasta el elemento
+        await page.evaluate(() => {
+          const element = document.querySelector('#fechaEmision');
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        });
+        
+        await sleep(1000);
+        
+        await page.click('#fechaEmision');
+        console.log(`[${cuit}] ✓ Click en #fechaEmision ejecutado`);
+        
+      } catch (error) {
+        console.error(`[${cuit}] ❌ Error haciendo click en #fechaEmision:`, error.message);
+        
+        // Intentar con JavaScript directo
+        console.log(`[${cuit}] Intentando click con JavaScript...`);
+        const clickResult = await page.evaluate(() => {
+          const input = document.querySelector('#fechaEmision');
+          if (input) {
+            input.focus();
+            input.click();
+            return true;
+          }
+          return false;
+        });
+        
+        if (!clickResult) {
+          throw new Error('No se pudo hacer click en #fechaEmision ni con selector ni con JavaScript');
+        }
+        
+        console.log(`[${cuit}] ✓ Click ejecutado con JavaScript`);
+      }
       await sleep(1500);
       
       // Click en: <li data-range-key="Año Pasado" class="active">Año Pasado</li>
