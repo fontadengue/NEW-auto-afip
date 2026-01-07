@@ -48,6 +48,7 @@ async function procesarClienteAFIP(cuit, clave) {
       throw new Error('❌ No se encontró Chrome/Chromium instalado.');
     }
 
+    // Configuración del navegador
     browser = await puppeteer.launch({
       headless: process.env.PUPPETEER_HEADLESS !== 'false',
       executablePath: chromeExecutable,
@@ -57,100 +58,181 @@ async function procesarClienteAFIP(cuit, clave) {
         '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
         '--disable-gpu',
-        '--window-size=1920,1080'
+        '--window-size=1920,1080',
+        '--disable-blink-features=AutomationControlled'
       ]
     });
 
     const page = await browser.newPage();
+
+    // Configurar viewport y user agent
     await page.setViewport({ width: 1920, height: 1080 });
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    console.log(`[${cuit}] Abriendo navegador e ingresando a AFIP...`);
+    // Ocultar que es un bot
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => undefined
+      });
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [1, 2, 3, 4, 5]
+      });
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['es-AR', 'es', 'en']
+      });
+    });
 
-    // 1. Abrir link
+    console.log(`[${cuit}] Navegando a AFIP...`);
+
+    // ============================================
+    // PASO 1: NAVEGAR A LA PÁGINA DE LOGIN
+    // ============================================
     await page.goto('https://auth.afip.gob.ar/contribuyente_/login.xhtml', {
       waitUntil: 'networkidle2',
       timeout: 30000
     });
-    await sleep(3000);
 
-    // 2. Click e ingresar CUIT
+    console.log(`[${cuit}] Página de login cargada`);
+    await sleep(1000 + Math.random() * 1000);
+
+    // ============================================
+    // PASO 2: INGRESAR CUIT
+    // ============================================
     console.log(`[${cuit}] Ingresando CUIT...`);
+    await page.waitForSelector('#F1\\:username', { timeout: 10000 });
     await page.click('#F1\\:username');
-    await sleep(500);
-    await page.type('#F1\\:username', cuit);
-    await sleep(1000);
-
-    // 3. Click en Siguiente
+    await sleep(300);
+    await page.type('#F1\\:username', cuit, { delay: 50 + Math.random() * 50 });
+    await sleep(500 + Math.random() * 500);
     await page.click('#F1\\:btnSiguiente');
-    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
-    await sleep(3000);
 
-    // 4. Click e ingresar clave
-    console.log(`[${cuit}] Ingresando clave...`);
+    console.log(`[${cuit}] CUIT ingresado, esperando página de contraseña...`);
+    await page.waitForNavigation({
+      waitUntil: 'networkidle2',
+      timeout: 30000
+    });
+
+    // ============================================
+    // PASO 3: INGRESAR CONTRASEÑA
+    // ============================================
+    console.log(`[${cuit}] Ingresando contraseña...`);
+    await page.waitForSelector('#F1\\:password', { timeout: 10000 });
     await page.click('#F1\\:password');
-    await sleep(500);
-    await page.type('#F1\\:password', clave);
-    await sleep(1000);
-
-    // 5. Click en Ingresar
+    await sleep(300);
+    await page.type('#F1\\:password', clave, { delay: 50 + Math.random() * 50 });
+    await sleep(500 + Math.random() * 500);
     await page.click('#F1\\:btnIngresar');
-    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 });
-    await sleep(5000);
 
-    // 6. Extraer nombre del usuario
-    console.log(`[${cuit}] Extrayendo nombre del usuario...`);
-    let nombreUsuario = 'No disponible';
-    try {
-      nombreUsuario = await page.$eval('strong.text-primary', el => el.textContent.trim());
-      console.log(`[${cuit}] Nombre: ${nombreUsuario}`);
-    } catch (e) {
-      console.log(`[${cuit}] No se pudo extraer el nombre`);
-    }
+    console.log(`[${cuit}] Contraseña ingresada, esperando dashboard...`);
+    await page.waitForNavigation({
+      waitUntil: 'networkidle2',
+      timeout: 30000
+    });
     await sleep(2000);
 
-    // 7. Navegar directamente a setearContribuyente
-    console.log(`[${cuit}] Navegando a sistema de comprobantes...`);
-    await page.goto('https://fes.afip.gob.ar/mcmp/jsp/setearContribuyente.do?idContribuyente=0', {
+    // ============================================
+    // PASO 4: VERIFICAR LOGIN EXITOSO
+    // ============================================
+    const loginExitoso = await verificarLoginExitoso(page);
+
+    if (!loginExitoso) {
+      throw new Error('Login fallido - Verificar credenciales');
+    }
+
+    console.log(`[${cuit}] ✓ Login exitoso`);
+    await sleep(2000);
+
+    // ============================================
+    // PASO 5: EXTRAER NOMBRE DEL USUARIO
+    // ============================================
+    console.log(`[${cuit}] Extrayendo nombre del usuario...`);
+    let nombreUsuario = 'No disponible';
+    
+    try {
+      nombreUsuario = await page.evaluate(() => {
+        const elemento = document.querySelector('strong.text-primary');
+        return elemento ? elemento.textContent.trim() : null;
+      });
+      
+      if (nombreUsuario) {
+        console.log(`[${cuit}] Nombre extraído: ${nombreUsuario}`);
+      } else {
+        console.log(`[${cuit}] No se pudo encontrar el nombre del usuario`);
+      }
+    } catch (e) {
+      console.log(`[${cuit}] Error extrayendo nombre:`, e.message);
+    }
+
+    await sleep(2000);
+
+    // ============================================
+    // PASO 6: ABRIR NUEVA PESTAÑA Y COPIAR COOKIES
+    // ============================================
+    console.log(`[${cuit}] Abriendo nueva pestaña para comprobantes...`);
+    const nuevaPagina = await browser.newPage();
+    await nuevaPagina.setViewport({ width: 1920, height: 1080 });
+    
+    // Copiar cookies de la sesión principal
+    const cookies = await page.cookies();
+    await nuevaPagina.setCookie(...cookies);
+    await sleep(1000);
+
+    // ============================================
+    // PASO 7: NAVEGAR A SETEAR CONTRIBUYENTE
+    // ============================================
+    console.log(`[${cuit}] Navegando a setearContribuyente...`);
+    await nuevaPagina.goto('https://fes.afip.gob.ar/mcmp/jsp/setearContribuyente.do?idContribuyente=0', {
       waitUntil: 'networkidle2',
       timeout: 45000
     });
     await sleep(3000);
 
-    // 8. Navegar a comprobantes emitidos
-    console.log(`[${cuit}] Navegando a comprobantes emitidos...`);
-    await page.goto('https://fes.afip.gob.ar/mcmp/jsp/comprobantesEmitidos.do', {
+    // ============================================
+    // PASO 8: NAVEGAR A COMPROBANTES EMITIDOS
+    // ============================================
+    console.log(`[${cuit}] Navegando a comprobantesEmitidos...`);
+    await nuevaPagina.goto('https://fes.afip.gob.ar/mcmp/jsp/comprobantesEmitidos.do', {
       waitUntil: 'networkidle2',
       timeout: 45000
     });
     await sleep(4000);
 
-    // 9. Click en fechaEmision
+    // ============================================
+    // PASO 9: CLICK EN FECHA EMISION
+    // ============================================
     console.log(`[${cuit}] Seleccionando fecha...`);
-    await page.click('#fechaEmision');
+    await nuevaPagina.click('#fechaEmision');
     await sleep(1500);
 
-    // 10. Click en "Año Pasado"
-    await page.click('li[data-range-key="Año Pasado"]');
+    // ============================================
+    // PASO 10: CLICK EN "AÑO PASADO"
+    // ============================================
+    await nuevaPagina.click('li[data-range-key="Año Pasado"]');
     await sleep(1500);
 
-    // 11. Click en Buscar
-    await page.click('#buscarComprobantes');
+    // ============================================
+    // PASO 11: CLICK EN BUSCAR
+    // ============================================
+    await nuevaPagina.click('#buscarComprobantes');
     await sleep(4000);
 
-    // 12. Click en icono de barras (menú de registros)
+    // ============================================
+    // PASO 12: CONFIGURAR 50 REGISTROS
+    // ============================================
     console.log(`[${cuit}] Configurando vista de 50 registros...`);
-    await page.click('.fa.fa-lg.fa-bars');
+    await nuevaPagina.click('.fa.fa-lg.fa-bars');
     await sleep(1500);
 
-    // 13. Click en 50
-    await page.evaluate(() => {
+    await nuevaPagina.evaluate(() => {
       const links = Array.from(document.querySelectorAll('a'));
       const link50 = links.find(a => a.textContent.trim() === '50');
       if (link50) link50.click();
     });
     await sleep(4000);
 
-    // 14. Sumar fila por fila
+    // ============================================
+    // PASO 13: SUMAR FILA POR FILA
+    // ============================================
     console.log(`[${cuit}] Comenzando suma de comprobantes...`);
     let totalFacturacion = 0.0;
     let hayPaginaSiguiente = true;
@@ -159,12 +241,11 @@ async function procesarClienteAFIP(cuit, clave) {
     while (hayPaginaSiguiente) {
       console.log(`[${cuit}] Procesando página ${paginaActual}...`);
 
-      // Sumar en la página actual
-      const { sumaPagina, filasProcesadas } = await page.evaluate(() => {
+      const { sumaPagina, filasProcesadas } = await nuevaPagina.evaluate(() => {
         let suma = 0.0;
         let procesadas = 0;
         
-        const filas = document.querySelectorAll('tbody tr');
+        const filas = document.querySelectorAll('#tablaDataTables tbody tr');
 
         filas.forEach(fila => {
           const cols = fila.querySelectorAll('td');
@@ -176,19 +257,16 @@ async function procesarClienteAFIP(cuit, clave) {
           cols.forEach(td => {
             const texto = td.textContent.trim();
             
-            // Buscar tipo de comprobante
-            if (texto.includes('Factura') || texto.includes('Nota de Crédito') || texto.includes('Nota de Débito')) {
+            if (texto.includes('Factura') || texto.includes('Nota de Crédito') || texto.includes('Nota de Débito') || texto.includes('Recibo')) {
               tipoComprobante = texto;
             }
             
-            // Buscar importe (columna Imp. Total)
             if (td.classList.contains('alignRight') && texto.includes('$')) {
               importeTexto = texto;
             }
           });
 
           if (tipoComprobante && importeTexto) {
-            // Limpiar importe: 120.000,00 -> 120000.00
             const importeLimpio = importeTexto
               .replace('$', '')
               .replace(/\s/g, '')
@@ -199,7 +277,7 @@ async function procesarClienteAFIP(cuit, clave) {
             const importe = parseFloat(importeLimpio);
 
             if (!isNaN(importe)) {
-              if (tipoComprobante.includes('Factura')) {
+              if (tipoComprobante.includes('Factura') || tipoComprobante.includes('Recibo')) {
                 suma += importe;
               } else if (tipoComprobante.includes('Nota de Crédito')) {
                 suma -= importe;
@@ -217,9 +295,11 @@ async function procesarClienteAFIP(cuit, clave) {
       totalFacturacion += sumaPagina;
       console.log(`[${cuit}] Página ${paginaActual}: ${filasProcesadas} filas. Acumulado: $${totalFacturacion.toLocaleString('es-AR', {minimumFractionDigits: 2})}`);
 
-      // 15. Verificar si hay página siguiente
-      const existeSiguiente = await page.evaluate(() => {
-        const botones = Array.from(document.querySelectorAll('a[aria-controls="tablaDataTables"]'));
+      // ============================================
+      // PASO 14: VERIFICAR PÁGINA SIGUIENTE
+      // ============================================
+      const existeSiguiente = await nuevaPagina.evaluate(() => {
+        const botones = Array.from(document.querySelectorAll('.paginate_button, .pagination a, li a'));
         const btnSiguiente = botones.find(b => b.textContent.trim() === '»');
         
         if (!btnSiguiente) return false;
@@ -234,13 +314,15 @@ async function procesarClienteAFIP(cuit, clave) {
 
       if (existeSiguiente) {
         paginaActual++;
-        await sleep(3000); // Pausa al cambiar de página
+        await sleep(3000);
       } else {
         hayPaginaSiguiente = false;
       }
     }
 
-    // 16. Totalizar
+    // ============================================
+    // PASO 15: TOTALIZAR
+    // ============================================
     const montoFacturas = totalFacturacion.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     console.log(`[${cuit}] ✓ Total Facturación Emitida: $${montoFacturas}`);
 
@@ -261,6 +343,42 @@ async function procesarClienteAFIP(cuit, clave) {
       await browser.close();
       console.log(`[${cuit}] Navegador cerrado`);
     }
+  }
+}
+
+/**
+ * Verifica si el login fue exitoso
+ */
+async function verificarLoginExitoso(page) {
+  try {
+    const urlActual = page.url();
+    console.log(`URL después del login: ${urlActual}`);
+
+    if (urlActual.includes('login') || urlActual.includes('error')) {
+      return false;
+    }
+
+    const elementosExitosos = [
+      'a[href*="logout"]',
+      '.usuario-logueado',
+      '#menu-principal',
+      'a[title*="Salir"]',
+      '.navbar-user'
+    ];
+
+    for (const selector of elementosExitosos) {
+      const elemento = await page.$(selector);
+      if (elemento) {
+        console.log(`Login verificado con selector: ${selector}`);
+        return true;
+      }
+    }
+
+    return !urlActual.includes('login');
+
+  } catch (error) {
+    console.error('Error verificando login:', error.message);
+    return false;
   }
 }
 
