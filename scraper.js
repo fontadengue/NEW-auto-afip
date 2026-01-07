@@ -129,135 +129,37 @@ async function procesarClienteAFIP(cuit, clave) {
     });
 
     console.log(`[${cuit}] Página de login cargada`);
-
-    // Esperar un momento para simular comportamiento humano
-    await sleep(1000 + Math.random() * 1000);
+    await sleep(2000);
 
     // ============================================
     // PASO 2: INGRESAR CUIT
     // ============================================
     console.log(`[${cuit}] Ingresando CUIT...`);
 
-    await page.waitForSelector('#F1\\:username', { timeout: 10000 });
-
-    // Tipear con delay aleatorio para simular humano
     await page.click('#F1\\:username');
     await sleep(300);
-    await page.type('#F1\\:username', cuit, { delay: 50 + Math.random() * 50 });
-
-    await sleep(500 + Math.random() * 500);
-
-    // Click en "Siguiente"
+    await page.type('#F1\\:username', cuit);
+    await sleep(500);
     await page.click('#F1\\:btnSiguiente');
 
     console.log(`[${cuit}] CUIT ingresado, esperando página de contraseña...`);
-
-    // Esperar a que cargue la página de contraseña
-    await page.waitForNavigation({
-      waitUntil: 'networkidle2',
-      timeout: 30000
-    });
+    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
+    await sleep(2000);
 
     // ============================================
     // PASO 3: INGRESAR CONTRASEÑA
     // ============================================
     console.log(`[${cuit}] Ingresando contraseña...`);
 
-    // Esperar que la página esté completamente cargada
-    await sleep(2000);
-    
-    // Verificar que estamos en la página correcta
-    const urlPassword = page.url();
-    console.log(`[${cuit}] URL página contraseña: ${urlPassword}`);
-
-    await page.waitForSelector('#F1\\:password', { visible: true, timeout: 10000 });
     await page.click('#F1\\:password');
+    await sleep(300);
+    await page.type('#F1\\:password', clave);
     await sleep(500);
-    
-    // Limpiar el campo antes de escribir (por si tiene algo)
-    await page.evaluate(() => {
-      const input = document.querySelector('#F1\\:password');
-      if (input) input.value = '';
-    });
-    
-    await page.type('#F1\\:password', clave, { delay: 50 + Math.random() * 50 });
-
-    await sleep(1000);
-    
-    // Verificar que el botón está visible y habilitado
-    const botonInfo = await page.evaluate(() => {
-      const btn = document.querySelector('#F1\\:btnIngresar');
-      return {
-        existe: !!btn,
-        visible: btn ? btn.offsetParent !== null : false,
-        disabled: btn ? btn.disabled : null,
-        value: btn ? btn.value : null
-      };
-    });
-    
-    console.log(`[${cuit}] Estado botón Ingresar:`, JSON.stringify(botonInfo));
-    
-    // Tomar screenshot antes del click para debugging
-    try {
-      await page.screenshot({
-        path: `/app/antes_click_ingresar_${cuit}_${Date.now()}.png`,
-        fullPage: true
-      });
-      console.log(`[${cuit}] 📸 Screenshot antes de click guardado`);
-    } catch (e) {
-      console.log(`[${cuit}] No se pudo guardar screenshot`);
-    }
-
-    // Esperar que el botón esté habilitado
-    await page.waitForSelector('#F1\\:btnIngresar:not([disabled])', { timeout: 10000 });
-    
-    console.log(`[${cuit}] Haciendo click en botón Ingresar...`);
-    
-    // Click en "Ingresar" con múltiples métodos por si falla
-    try {
-      await page.click('#F1\\:btnIngresar');
-      console.log(`[${cuit}] ✓ Click con selector`);
-    } catch (error) {
-      console.log(`[${cuit}] Click con selector falló, intentando con evaluate...`);
-      await page.evaluate(() => {
-        document.querySelector('#F1\\:btnIngresar').click();
-      });
-      console.log(`[${cuit}] ✓ Click con evaluate`);
-    }
-    
-    // También presionar Enter en el campo de contraseña por si acaso
-    await sleep(500);
-    await page.keyboard.press('Enter');
-    console.log(`[${cuit}] ✓ Presionado Enter`);
+    await page.click('#F1\\:btnIngresar');
 
     console.log(`[${cuit}] Contraseña ingresada, esperando dashboard...`);
-
-    // Esperar a que cargue el dashboard con timeout más largo
-    try {
-      await page.waitForNavigation({
-        waitUntil: 'networkidle2',
-        timeout: 60000 // Aumentado a 60 segundos
-      });
-    } catch (error) {
-      console.log(`[${cuit}] Timeout esperando navegación, verificando URL...`);
-    }
-
-    // Esperar más tiempo para asegurar que todo cargó
-    await sleep(5000);
-    
-    // Verificar URL actual
-    const urlActual = page.url();
-    console.log(`[${cuit}] URL actual: ${urlActual}`);
-    
-    // Si sigue en loginClave, esperar más
-    if (urlActual.includes('loginClave')) {
-      console.log(`[${cuit}] Todavía en página de login, esperando más...`);
-      await sleep(10000);
-      
-      // Verificar de nuevo
-      const urlDespues = page.url();
-      console.log(`[${cuit}] URL después de espera: ${urlDespues}`);
-    }
+    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 });
+    await sleep(3000);
 
     // ============================================
     // PASO 4: VERIFICAR LOGIN EXITOSO
@@ -265,16 +167,6 @@ async function procesarClienteAFIP(cuit, clave) {
     const loginExitoso = await verificarLoginExitoso(page);
 
     if (!loginExitoso) {
-      // Tomar screenshot para debugging
-      try {
-        await page.screenshot({
-          path: `error_login_${cuit}_${Date.now()}.png`,
-          fullPage: true
-        });
-      } catch (e) {
-        console.error(`[${cuit}] No se pudo tomar screenshot:`, e.message);
-      }
-
       throw new Error('Login fallido - Verificar credenciales');
     }
 
@@ -334,37 +226,11 @@ async function verificarLoginExitoso(page) {
     const urlActual = page.url();
     console.log(`URL después del login: ${urlActual}`);
 
-    // Verificación 1: La URL no debe contener "login" (excepto si es el portal)
-    if (urlActual.includes('login') && !urlActual.includes('portal')) {
-      console.log(`[VERIFICACIÓN] Login falló - URL todavía contiene 'login'`);
-      return false;
-    }
-
-    // Verificación 2: Debe estar en el portal o en una página de AFIP válida
-    if (urlActual.includes('portal') || urlActual.includes('afip.gob.ar')) {
-      console.log(`[VERIFICACIÓN] Login exitoso - URL válida`);
+    // Si la URL contiene "portal" o ya no contiene "login", el login fue exitoso
+    if (urlActual.includes('portal') || !urlActual.includes('login')) {
       return true;
     }
 
-    // Verificación 3: Buscar elementos que indican login exitoso
-    const elementosExitosos = [
-      'a[href*="logout"]',
-      'a[href*="salir"]',
-      '.usuario-logueado',
-      '#menu-principal',
-      'a[title*="Salir"]',
-      '.navbar-user'
-    ];
-
-    for (const selector of elementosExitosos) {
-      const elemento = await page.$(selector);
-      if (elemento) {
-        console.log(`[VERIFICACIÓN] Login verificado con selector: ${selector}`);
-        return true;
-      }
-    }
-
-    // Si llegamos aquí, el login probablemente falló
     return false;
 
   } catch (error) {
