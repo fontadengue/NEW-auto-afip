@@ -331,19 +331,35 @@ async function extraerDatos(page, cuit) {
     // CALCULAR FACTURACIÓN
     // ============================================
     try {
-      console.log(`[${cuit}] Navegando a setearContribuyente.do...`);
-      await page.goto('https://fes.afip.gob.ar/mcmp/jsp/setearContribuyente.do?idContribuyente=0', {
+      console.log(`[${cuit}] Abriendo comprobantes en nueva pestaña...`);
+      
+      // En lugar de navegar (que cierra la sesión), abrir en nueva pestaña
+      const nuevaPagina = await browser.newPage();
+      
+      // Configurar la nueva página igual que la original
+      await nuevaPagina.setViewport({ width: 1920, height: 1080 });
+      await nuevaPagina.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      
+      // Copiar cookies de la página principal a la nueva
+      const cookies = await page.cookies();
+      await nuevaPagina.setCookie(...cookies);
+      
+      console.log(`[${cuit}] Navegando a setearContribuyente en nueva pestaña...`);
+      await nuevaPagina.goto('https://fes.afip.gob.ar/mcmp/jsp/setearContribuyente.do?idContribuyente=0', {
         waitUntil: 'networkidle2',
         timeout: 45000
       });
       await sleep(2000);
 
-      console.log(`[${cuit}] Navegando a comprobantesEmitidos.do...`);
-      await page.goto('https://fes.afip.gob.ar/mcmp/jsp/comprobantesEmitidos.do', {
+      console.log(`[${cuit}] Navegando a comprobantesEmitidos en nueva pestaña...`);
+      await nuevaPagina.goto('https://fes.afip.gob.ar/mcmp/jsp/comprobantesEmitidos.do', {
         waitUntil: 'networkidle2',
         timeout: 45000
       });
-      await sleep(5000); // Aumentar tiempo de espera
+      await sleep(5000);
+      
+      // Desde ahora usamos la nueva página
+      page = nuevaPagina;
 
       // ============================================
       // DIAGNOSTICAR LA PÁGINA
@@ -381,12 +397,21 @@ async function extraerDatos(page, cuit) {
           // HTML de los primeros inputs de texto
           htmlInputsTexto: Array.from(document.querySelectorAll('input[type="text"]'))
             .slice(0, 5)
-            .map(i => i.outerHTML)
+            .map(i => i.outerHTML),
+          // Buscar mensajes de error o sesión expirada
+          textosPagina: document.body.textContent.toLowerCase().includes('sesión') ? 
+            document.body.textContent.substring(0, 500) : null
         };
       });
       
       console.log(`[${cuit}] 📊 DIAGNÓSTICO COMPLETO:`);
       console.log(JSON.stringify(diagnostico, null, 2));
+      
+      // Verificar si la sesión expiró
+      if (diagnostico.title.toLowerCase().includes('expirado') || 
+          diagnostico.title.toLowerCase().includes('sesión')) {
+        throw new Error(`Sesión expirada en AFIP. Título: "${diagnostico.title}". La navegación directa a URLs no mantiene la sesión activa.`);
+      }
       
       // Tomar screenshot para ver visualmente
       try {
