@@ -163,15 +163,72 @@ async function procesarClienteAFIP(cuit, clave) {
     // ============================================
     console.log(`[${cuit}] Ingresando contraseña...`);
 
-    await page.waitForSelector('#F1\\:password', { timeout: 10000 });
+    // Esperar que la página esté completamente cargada
+    await sleep(2000);
+    
+    // Verificar que estamos en la página correcta
+    const urlPassword = page.url();
+    console.log(`[${cuit}] URL página contraseña: ${urlPassword}`);
+
+    await page.waitForSelector('#F1\\:password', { visible: true, timeout: 10000 });
     await page.click('#F1\\:password');
-    await sleep(300);
+    await sleep(500);
+    
+    // Limpiar el campo antes de escribir (por si tiene algo)
+    await page.evaluate(() => {
+      const input = document.querySelector('#F1\\:password');
+      if (input) input.value = '';
+    });
+    
     await page.type('#F1\\:password', clave, { delay: 50 + Math.random() * 50 });
 
-    await sleep(500 + Math.random() * 500);
+    await sleep(1000);
+    
+    // Verificar que el botón está visible y habilitado
+    const botonInfo = await page.evaluate(() => {
+      const btn = document.querySelector('#F1\\:btnIngresar');
+      return {
+        existe: !!btn,
+        visible: btn ? btn.offsetParent !== null : false,
+        disabled: btn ? btn.disabled : null,
+        value: btn ? btn.value : null
+      };
+    });
+    
+    console.log(`[${cuit}] Estado botón Ingresar:`, JSON.stringify(botonInfo));
+    
+    // Tomar screenshot antes del click para debugging
+    try {
+      await page.screenshot({
+        path: `/app/antes_click_ingresar_${cuit}_${Date.now()}.png`,
+        fullPage: true
+      });
+      console.log(`[${cuit}] 📸 Screenshot antes de click guardado`);
+    } catch (e) {
+      console.log(`[${cuit}] No se pudo guardar screenshot`);
+    }
 
-    // Click en "Ingresar"
-    await page.click('#F1\\:btnIngresar');
+    // Esperar que el botón esté habilitado
+    await page.waitForSelector('#F1\\:btnIngresar:not([disabled])', { timeout: 10000 });
+    
+    console.log(`[${cuit}] Haciendo click en botón Ingresar...`);
+    
+    // Click en "Ingresar" con múltiples métodos por si falla
+    try {
+      await page.click('#F1\\:btnIngresar');
+      console.log(`[${cuit}] ✓ Click con selector`);
+    } catch (error) {
+      console.log(`[${cuit}] Click con selector falló, intentando con evaluate...`);
+      await page.evaluate(() => {
+        document.querySelector('#F1\\:btnIngresar').click();
+      });
+      console.log(`[${cuit}] ✓ Click con evaluate`);
+    }
+    
+    // También presionar Enter en el campo de contraseña por si acaso
+    await sleep(500);
+    await page.keyboard.press('Enter');
+    console.log(`[${cuit}] ✓ Presionado Enter`);
 
     console.log(`[${cuit}] Contraseña ingresada, esperando dashboard...`);
 
