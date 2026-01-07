@@ -71,29 +71,31 @@ async function procesarClienteAFIP(cuit, clave) {
       waitUntil: 'networkidle2',
       timeout: 30000
     });
-    await sleep(2000);
+    await sleep(3000);
 
     // 2. Click e ingresar CUIT
     console.log(`[${cuit}] Ingresando CUIT...`);
     await page.click('#F1\\:username');
-    await page.type('#F1\\:username', cuit);
     await sleep(500);
+    await page.type('#F1\\:username', cuit);
+    await sleep(1000);
 
     // 3. Click en Siguiente
     await page.click('#F1\\:btnSiguiente');
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
-    await sleep(2000);
+    await sleep(3000);
 
     // 4. Click e ingresar clave
     console.log(`[${cuit}] Ingresando clave...`);
     await page.click('#F1\\:password');
-    await page.type('#F1\\:password', clave);
     await sleep(500);
+    await page.type('#F1\\:password', clave);
+    await sleep(1000);
 
     // 5. Click en Ingresar
     await page.click('#F1\\:btnIngresar');
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 });
-    await sleep(3000);
+    await sleep(5000);
 
     // 6. Extraer nombre del usuario
     console.log(`[${cuit}] Extrayendo nombre del usuario...`);
@@ -104,72 +106,51 @@ async function procesarClienteAFIP(cuit, clave) {
     } catch (e) {
       console.log(`[${cuit}] No se pudo extraer el nombre`);
     }
-
-    // 7. Click en buscador y escribir "Mis Comprobantes"
-    console.log(`[${cuit}] Buscando Mis Comprobantes...`);
-    await page.click('#buscadorInput');
-    await sleep(500);
-    await page.type('#buscadorInput', 'Mis Comprobantes');
     await sleep(2000);
 
-    // 8. Click en el resultado de búsqueda
-    await page.evaluate(() => {
-      const divs = Array.from(document.querySelectorAll('.col-sm-9'));
-      const resultado = divs.find(div => {
-        const text = div.textContent;
-        return text.includes('Mis Comprobantes') && text.includes('Consulta de Comprobantes Electrónicos');
-      });
-      if (resultado) {
-        resultado.click();
-      }
-    });
-    await sleep(3000);
-
-    // 9. Esperar que se abra nueva pestaña
-    console.log(`[${cuit}] Esperando nueva pestaña...`);
-    const pages = await browser.pages();
-    let nuevaPagina = pages[pages.length - 1];
-    
-    // Si no se abrió nueva pestaña, usar la actual
-    if (pages.length === 1) {
-      nuevaPagina = page;
-    }
-
-    // 10. Navegar a comprobantes emitidos en la nueva pestaña
-    console.log(`[${cuit}] Navegando a comprobantes emitidos...`);
-    await nuevaPagina.goto('https://fes.afip.gob.ar/mcmp/jsp/comprobantesEmitidos.do', {
+    // 7. Navegar directamente a setearContribuyente
+    console.log(`[${cuit}] Navegando a sistema de comprobantes...`);
+    await page.goto('https://fes.afip.gob.ar/mcmp/jsp/setearContribuyente.do?idContribuyente=0', {
       waitUntil: 'networkidle2',
       timeout: 45000
     });
     await sleep(3000);
 
-    // 11. Click en fechaEmision
+    // 8. Navegar a comprobantes emitidos
+    console.log(`[${cuit}] Navegando a comprobantes emitidos...`);
+    await page.goto('https://fes.afip.gob.ar/mcmp/jsp/comprobantesEmitidos.do', {
+      waitUntil: 'networkidle2',
+      timeout: 45000
+    });
+    await sleep(4000);
+
+    // 9. Click en fechaEmision
     console.log(`[${cuit}] Seleccionando fecha...`);
-    await nuevaPagina.click('#fechaEmision');
-    await sleep(1000);
+    await page.click('#fechaEmision');
+    await sleep(1500);
 
-    // 12. Click en "Año Pasado"
-    await nuevaPagina.click('li[data-range-key="Año Pasado"]');
-    await sleep(1000);
+    // 10. Click en "Año Pasado"
+    await page.click('li[data-range-key="Año Pasado"]');
+    await sleep(1500);
 
-    // 13. Click en Buscar
-    await nuevaPagina.click('#buscarComprobantes');
-    await sleep(3000);
+    // 11. Click en Buscar
+    await page.click('#buscarComprobantes');
+    await sleep(4000);
 
-    // 14. Click en icono de barras (menú de registros)
+    // 12. Click en icono de barras (menú de registros)
     console.log(`[${cuit}] Configurando vista de 50 registros...`);
-    await nuevaPagina.click('.fa.fa-lg.fa-bars');
-    await sleep(1000);
+    await page.click('.fa.fa-lg.fa-bars');
+    await sleep(1500);
 
-    // 15. Click en 50
-    await nuevaPagina.evaluate(() => {
+    // 13. Click en 50
+    await page.evaluate(() => {
       const links = Array.from(document.querySelectorAll('a'));
       const link50 = links.find(a => a.textContent.trim() === '50');
       if (link50) link50.click();
     });
-    await sleep(3000);
+    await sleep(4000);
 
-    // 16. Sumar fila por fila
+    // 14. Sumar fila por fila
     console.log(`[${cuit}] Comenzando suma de comprobantes...`);
     let totalFacturacion = 0.0;
     let hayPaginaSiguiente = true;
@@ -179,7 +160,7 @@ async function procesarClienteAFIP(cuit, clave) {
       console.log(`[${cuit}] Procesando página ${paginaActual}...`);
 
       // Sumar en la página actual
-      const { sumaPagina, filasProcesadas } = await nuevaPagina.evaluate(() => {
+      const { sumaPagina, filasProcesadas } = await page.evaluate(() => {
         let suma = 0.0;
         let procesadas = 0;
         
@@ -236,8 +217,8 @@ async function procesarClienteAFIP(cuit, clave) {
       totalFacturacion += sumaPagina;
       console.log(`[${cuit}] Página ${paginaActual}: ${filasProcesadas} filas. Acumulado: $${totalFacturacion.toLocaleString('es-AR', {minimumFractionDigits: 2})}`);
 
-      // 17. Verificar si hay página siguiente
-      const existeSiguiente = await nuevaPagina.evaluate(() => {
+      // 15. Verificar si hay página siguiente
+      const existeSiguiente = await page.evaluate(() => {
         const botones = Array.from(document.querySelectorAll('a[aria-controls="tablaDataTables"]'));
         const btnSiguiente = botones.find(b => b.textContent.trim() === '»');
         
@@ -253,13 +234,13 @@ async function procesarClienteAFIP(cuit, clave) {
 
       if (existeSiguiente) {
         paginaActual++;
-        await sleep(2000);
+        await sleep(3000); // Pausa al cambiar de página
       } else {
         hayPaginaSiguiente = false;
       }
     }
 
-    // 18. Totalizar
+    // 16. Totalizar
     const montoFacturas = totalFacturacion.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     console.log(`[${cuit}] ✓ Total Facturación Emitida: $${montoFacturas}`);
 
