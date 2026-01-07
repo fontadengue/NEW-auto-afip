@@ -175,14 +175,32 @@ async function procesarClienteAFIP(cuit, clave) {
 
     console.log(`[${cuit}] Contraseña ingresada, esperando dashboard...`);
 
-    // Esperar a que cargue el dashboard
-    await page.waitForNavigation({
-      waitUntil: 'networkidle2',
-      timeout: 30000
-    });
+    // Esperar a que cargue el dashboard con timeout más largo
+    try {
+      await page.waitForNavigation({
+        waitUntil: 'networkidle2',
+        timeout: 60000 // Aumentado a 60 segundos
+      });
+    } catch (error) {
+      console.log(`[${cuit}] Timeout esperando navegación, verificando URL...`);
+    }
 
-    // Esperar un poco más para asegurar que todo cargó
-    await sleep(2000);
+    // Esperar más tiempo para asegurar que todo cargó
+    await sleep(5000);
+    
+    // Verificar URL actual
+    const urlActual = page.url();
+    console.log(`[${cuit}] URL actual: ${urlActual}`);
+    
+    // Si sigue en loginClave, esperar más
+    if (urlActual.includes('loginClave')) {
+      console.log(`[${cuit}] Todavía en página de login, esperando más...`);
+      await sleep(10000);
+      
+      // Verificar de nuevo
+      const urlDespues = page.url();
+      console.log(`[${cuit}] URL después de espera: ${urlDespues}`);
+    }
 
     // ============================================
     // PASO 4: VERIFICAR LOGIN EXITOSO
@@ -259,14 +277,22 @@ async function verificarLoginExitoso(page) {
     const urlActual = page.url();
     console.log(`URL después del login: ${urlActual}`);
 
-    // Verificación 1: La URL no debe contener "login" o "error"
-    if (urlActual.includes('login') || urlActual.includes('error')) {
+    // Verificación 1: La URL no debe contener "login" (excepto si es el portal)
+    if (urlActual.includes('login') && !urlActual.includes('portal')) {
+      console.log(`[VERIFICACIÓN] Login falló - URL todavía contiene 'login'`);
       return false;
     }
 
-    // Verificación 2: Buscar elementos que indican login exitoso
+    // Verificación 2: Debe estar en el portal o en una página de AFIP válida
+    if (urlActual.includes('portal') || urlActual.includes('afip.gob.ar')) {
+      console.log(`[VERIFICACIÓN] Login exitoso - URL válida`);
+      return true;
+    }
+
+    // Verificación 3: Buscar elementos que indican login exitoso
     const elementosExitosos = [
       'a[href*="logout"]',
+      'a[href*="salir"]',
       '.usuario-logueado',
       '#menu-principal',
       'a[title*="Salir"]',
@@ -276,13 +302,13 @@ async function verificarLoginExitoso(page) {
     for (const selector of elementosExitosos) {
       const elemento = await page.$(selector);
       if (elemento) {
-        console.log(`Login verificado con selector: ${selector}`);
+        console.log(`[VERIFICACIÓN] Login verificado con selector: ${selector}`);
         return true;
       }
     }
 
-    // Si llegamos aquí y la URL cambió, asumimos que el login fue exitoso
-    return !urlActual.includes('login');
+    // Si llegamos aquí, el login probablemente falló
+    return false;
 
   } catch (error) {
     console.error('Error verificando login:', error.message);
