@@ -5,31 +5,36 @@ const XLSX = require("xlsx");
 const fs = require("fs");
 const puppeteer = require("puppeteer");
 const path = require("path");
-const nodemailer = require("nodemailer");
+const sgMail = require('@sendgrid/mail');
 require("dotenv").config();
 
 const app = express();
 
 // ================================
-// CONFIGURACIÓN DE NODEMAILER
+// CONFIGURACIÓN DE SENDGRID
 // ================================
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || "smtp.gmail.com",
-  port: process.env.SMTP_PORT || 587,
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
-});
+if (process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+  console.log('✅ SendGrid configurado');
+} else {
+  console.warn('⚠️  SENDGRID_API_KEY no configurado - Los emails no se enviarán');
+}
 
-// Función para enviar email
+// Función para enviar email con SendGrid
 async function enviarEmail(destinatario, excelPath, filename) {
+  if (!process.env.SENDGRID_API_KEY) {
+    console.log('⚠️  Email no enviado - SENDGRID_API_KEY no configurado');
+    return false;
+  }
+
   try {
-    const info = await transporter.sendMail({
-      from: `"AFIP Automation" <${process.env.SMTP_USER}>`,
+    // Leer archivo Excel
+    const attachment = fs.readFileSync(excelPath).toString('base64');
+    
+    const msg = {
       to: destinatario,
-      subject: "✅ Resultados AFIP - Proceso Completado",
+      from: process.env.SENDGRID_FROM_EMAIL || process.env.SMTP_USER,
+      subject: '✅ Resultados AFIP - Proceso Completado',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #4F46E5;">🎉 Proceso Completado</h2>
@@ -47,16 +52,19 @@ async function enviarEmail(destinatario, excelPath, filename) {
       `,
       attachments: [
         {
+          content: attachment,
           filename: filename,
-          path: excelPath
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          disposition: 'attachment'
         }
       ]
-    });
+    };
     
-    console.log("📧 Email enviado:", info.messageId);
+    await sgMail.send(msg);
+    console.log("📧 Email enviado via SendGrid");
     return true;
   } catch (error) {
-    console.error("❌ Error enviando email:", error);
+    console.error("❌ Error enviando email:", error.response?.body || error);
     return false;
   }
 }
