@@ -5,8 +5,61 @@ const XLSX = require("xlsx");
 const fs = require("fs");
 const puppeteer = require("puppeteer");
 const path = require("path");
+const nodemailer = require("nodemailer");
+require("dotenv").config();
 
 const app = express();
+
+// ================================
+// CONFIGURACIÓN DE NODEMAILER
+// ================================
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || "smtp.gmail.com",
+  port: process.env.SMTP_PORT || 587,
+  secure: false,
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS
+  }
+});
+
+// Función para enviar email
+async function enviarEmail(destinatario, excelPath, filename) {
+  try {
+    const info = await transporter.sendMail({
+      from: `"AFIP Automation" <${process.env.SMTP_USER}>`,
+      to: destinatario,
+      subject: "✅ Resultados AFIP - Proceso Completado",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #4F46E5;">🎉 Proceso Completado</h2>
+          <p>Tu extracción de datos de AFIP ha finalizado exitosamente.</p>
+          <p>En el archivo adjunto encontrarás:</p>
+          <ul>
+            <li>📊 <strong>Comprobantes Emitidos</strong> por cliente</li>
+            <li>📥 <strong>Comprobantes Recibidos</strong> por cliente</li>
+          </ul>
+          <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 20px 0;">
+          <p style="color: #6B7280; font-size: 14px;">
+            Este es un email automático del sistema de automatización AFIP.
+          </p>
+        </div>
+      `,
+      attachments: [
+        {
+          filename: filename,
+          path: excelPath
+        }
+      ]
+    });
+    
+    console.log("📧 Email enviado:", info.messageId);
+    return true;
+  } catch (error) {
+    console.error("❌ Error enviando email:", error);
+    return false;
+  }
+}
 
 // ================================
 // CORS
@@ -54,7 +107,9 @@ app.post("/api/process", upload.single("excel"), async (req, res) => {
     return res.status(400).json({ error: "No se recibió archivo" });
   }
 
+  const userEmail = req.body.email;
   console.log(`📁 Archivo: ${req.file.originalname} (${req.file.size} bytes)`);
+  console.log(`📧 Email destinatario: ${userEmail}`);
 
   // Configurar SSE
   res.setHeader("Content-Type", "text/event-stream");
@@ -180,6 +235,23 @@ app.post("/api/process", upload.single("excel"), async (req, res) => {
       excel: excelBase64,
       filename: `resultados_afip_${new Date().toISOString().split('T')[0]}.xlsx`
     });
+
+    // Enviar email si se proporcionó
+    if (userEmail) {
+      console.log(`📧 Enviando email a ${userEmail}...`);
+      const emailEnviado = await enviarEmail(
+        userEmail,
+        excelPath,
+        `resultados_afip_${new Date().toISOString().split('T')[0]}.xlsx`
+      );
+      
+      if (emailEnviado) {
+        sendSSE(res, {
+          type: "email_sent",
+          email: userEmail
+        });
+      }
+    }
 
     res.end();
 
