@@ -3,6 +3,7 @@ import { Upload, FileSpreadsheet, Loader2, CheckCircle, XCircle, Download } from
 
 export default function AFIPAutomation() {
   const [file, setFile] = useState<File | null>(null);
+  const [email, setEmail] = useState('');
   const [processing, setProcessing] = useState(false);
   const [results, setResults] = useState<any[] | null>(null);
   const [currentClient, setCurrentClient] = useState('');
@@ -10,6 +11,7 @@ export default function AFIPAutomation() {
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
   const [excelData, setExcelData] = useState<{ base64: string; filename: string } | null>(null);
+  const [emailSent, setEmailSent] = useState(false);
 
   const BACKEND_URL = import.meta.env.VITE_API_URL || 'https://initial-commit-afip-automation-backend.onrender.com';
 
@@ -30,14 +32,21 @@ export default function AFIPAutomation() {
 
   const processExcel = async () => {
     if (!file) return;
+    
+    if (!email || !email.includes('@')) {
+      alert('Por favor, ingresa un email válido');
+      return;
+    }
 
     setProcessing(true);
     setResults(null);
     setError(null);
     setExcelData(null);
+    setEmailSent(false);
 
     const formData = new FormData();
     formData.append('excel', file);
+    formData.append('email', email);
 
     try {
       console.log('Enviando a:', `${BACKEND_URL}/api/process`);
@@ -79,6 +88,9 @@ export default function AFIPAutomation() {
                 setCurrentClient(data.cuit);
                 setNumCliente(data.numCliente || '');
                 setProgress({ current: data.current, total: data.total });
+              } else if (data.type === 'email_sent') {
+                setEmailSent(true);
+                console.log('Email enviado exitosamente');
               } else if (data.type === 'complete') {
                 setResults(data.results);
                 setExcelData({
@@ -218,10 +230,29 @@ export default function AFIPAutomation() {
             </label>
           </div>
 
+          <div className="mb-6">
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
+              Email para recibir resultados
+            </label>
+            <input
+              type="email"
+              id="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="tu@email.com"
+              disabled={processing}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
+              required
+            />
+            <p className="text-xs text-gray-500 mt-2">
+              📧 Recibirás el Excel por email cuando termine el proceso. Puedes cerrar esta página.
+            </p>
+          </div>
+
           <button
             onClick={processExcel}
-            disabled={!file || processing}
-            className={`w-full py-4 rounded-lg font-semibold text-white text-lg transition-all ${!file || processing
+            disabled={!file || !email || processing}
+            className={`w-full py-4 rounded-lg font-semibold text-white text-lg transition-all ${!file || !email || processing
               ? 'bg-gray-300 cursor-not-allowed'
               : 'bg-indigo-600 hover:bg-indigo-700 shadow-lg hover:shadow-xl'
               }`}
@@ -256,6 +287,21 @@ export default function AFIPAutomation() {
                 <p>Cliente: <span className="font-mono font-semibold">{numCliente}</span></p>
                 <p>CUIT: <span className="font-mono font-semibold">{currentClient}</span></p>
               </div>
+            </div>
+          )}
+
+          {emailSent && (
+            <div className="mt-6 p-4 bg-green-50 border-l-4 border-green-500 rounded">
+              <h3 className="font-semibold text-green-900 mb-2 flex items-center gap-2">
+                <CheckCircle className="w-5 h-5" />
+                Email Enviado
+              </h3>
+              <p className="text-sm text-green-800">
+                📧 El Excel ha sido enviado a <strong>{email}</strong>
+              </p>
+              <p className="text-xs text-green-700 mt-2">
+                Puedes cerrar esta página. Revisa tu bandeja de entrada.
+              </p>
             </div>
           )}
 
