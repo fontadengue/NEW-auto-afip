@@ -65,6 +65,13 @@ async function procesarClienteAFIP(cuit, clave) {
 
     const page = await browser.newPage();
 
+    // Cerrar la primera pestaña en blanco
+    const pages = await browser.pages();
+    if (pages.length > 1 && pages[0].url() === 'about:blank') {
+      await pages[0].close();
+      console.log(`[${cuit}] Pestaña en blanco cerrada`);
+    }
+
     // Configurar viewport y user agent
     await page.setViewport({ width: 1920, height: 1080 });
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
@@ -106,17 +113,15 @@ async function procesarClienteAFIP(cuit, clave) {
     await sleep(500 + Math.random() * 500);
     await page.click('#F1\\:btnSiguiente');
 
-    console.log(`[${cuit}] CUIT ingresado, esperando página de contraseña...`);
-    await page.waitForNavigation({
-      waitUntil: 'networkidle2',
-      timeout: 30000
-    });
+    console.log(`[${cuit}] CUIT ingresado, esperando campo de contraseña...`);
 
     // ============================================
     // PASO 3: INGRESAR CONTRASEÑA
     // ============================================
     console.log(`[${cuit}] Ingresando contraseña...`);
-    await page.waitForSelector('#F1\\:password', { timeout: 10000 });
+    
+    // Esperar directamente a que aparezca el campo de contraseña
+    await page.waitForSelector('#F1\\:password', { visible: true, timeout: 30000 });
     await page.click('#F1\\:password');
     await sleep(300);
     await page.type('#F1\\:password', clave, { delay: 50 + Math.random() * 50 });
@@ -166,72 +171,57 @@ async function procesarClienteAFIP(cuit, clave) {
     await sleep(2000);
 
     // ============================================
-    // PASO 6: NAVEGAR A SETEAR CONTRIBUYENTE (MISMA PESTAÑA)
+    // PASO 6: BUSCAR "MIS COMPROBANTES"
     // ============================================
-    console.log(`[${cuit}] Navegando a setearContribuyente...`);
-    await page.goto('https://fes.afip.gob.ar/mcmp/jsp/setearContribuyente.do?idContribuyente=0', {
+    console.log(`[${cuit}] Buscando "Mis Comprobantes"...`);
+    
+    // Click en el buscador
+    await page.waitForSelector('#buscadorInput', { timeout: 10000 });
+    await page.click('#buscadorInput');
+    await sleep(500);
+    
+    // Escribir "Mis Comprobantes"
+    await page.type('#buscadorInput', 'Mis Comprobantes');
+    await sleep(2000);
+    
+    // Click en el resultado "Mis Comprobantes"
+    console.log(`[${cuit}] Haciendo click en resultado...`);
+    await page.waitForSelector('p.small.text-muted', { timeout: 5000 });
+    
+    // Buscar el elemento que contiene exactamente "Mis Comprobantes"
+    await page.evaluate(() => {
+      const elementos = Array.from(document.querySelectorAll('p.small.text-muted'));
+      const miComprobantes = elementos.find(el => el.textContent.trim() === 'Mis Comprobantes');
+      if (miComprobantes) {
+        miComprobantes.click();
+      }
+    });
+    await sleep(3000);
+
+    // ============================================
+    // PASO 7: NAVEGAR A COMPROBANTES EMITIDOS (MISMA PESTAÑA)
+    // ============================================
+    console.log(`[${cuit}] Navegando a comprobantesEmitidos.do...`);
+    await page.goto('https://fes.afip.gob.ar/mcmp/jsp/comprobantesEmitidos.do', {
       waitUntil: 'networkidle2',
       timeout: 45000
     });
     await sleep(3000);
     
-    // Verificar URL
-    console.log(`[${cuit}] URL después de setearContribuyente: ${page.url()}`);
-
-    // ============================================
-    // PASO 7: NAVEGAR A COMPROBANTES EMITIDOS
-    // ============================================
-    console.log(`[${cuit}] Navegando a comprobantesEmitidos...`);
-    await page.goto('https://fes.afip.gob.ar/mcmp/jsp/comprobantesEmitidos.do', {
-      waitUntil: 'networkidle2',
-      timeout: 45000
-    });
-    await sleep(5000); // Espera más larga para asegurar que cargue
-
-    // Verificar URL y título
-    const urlComprobantes = page.url();
-    const tituloComprobantes = await page.title();
-    console.log(`[${cuit}] URL comprobantes: ${urlComprobantes}`);
-    console.log(`[${cuit}] Título página: ${tituloComprobantes}`);
-    
-    // Verificar si la sesión expiró
-    if (tituloComprobantes.toLowerCase().includes('sesión') || tituloComprobantes.toLowerCase().includes('expirado')) {
-      throw new Error('Sesión expirada al navegar a comprobantes. Título: ' + tituloComprobantes);
-    }
-
-    // Verificar si existe el elemento fechaEmision
-    console.log(`[${cuit}] Verificando si existe #fechaEmision...`);
-    const fechaExiste = await page.$('#fechaEmision');
-    
-    if (!fechaExiste) {
-      console.log(`[${cuit}] ❌ #fechaEmision NO encontrado`);
-      
-      // Diagnóstico: ver qué inputs hay en la página
-      const inputsDisponibles = await page.evaluate(() => {
-        const inputs = Array.from(document.querySelectorAll('input'));
-        return inputs.map(i => ({
-          id: i.id,
-          name: i.name,
-          type: i.type,
-          class: i.className
-        })).slice(0, 10);
-      });
-      
-      console.log(`[${cuit}] Inputs disponibles:`, JSON.stringify(inputsDisponibles, null, 2));
-      
-      // Tomar screenshot
-      try {
-        await page.screenshot({
-          path: `/app/error_no_fecha_${cuit}_${Date.now()}.png`,
-          fullPage: true
-        });
-        console.log(`[${cuit}] Screenshot guardado en /app/`);
-      } catch (e) {
-        console.log(`[${cuit}] No se pudo guardar screenshot`);
+    // Cerrar otras pestañas abiertas
+    const paginasAbiertas = await browser.pages();
+    for (const p of paginasAbiertas) {
+      if (p !== page) {
+        await p.close();
       }
-      
-      throw new Error('#fechaEmision no encontrado. Ver screenshot y logs.');
     }
+    console.log(`[${cuit}] Otras pestañas cerradas`);
+    
+    await sleep(2000);
+    
+    // Verificar URL actual
+    const urlEmitidos = page.url();
+    console.log(`[${cuit}] URL Emitidos: ${urlEmitidos}`);
 
     // ============================================
     // PASO 8: CLICK EN FECHA EMISION
@@ -272,10 +262,10 @@ async function procesarClienteAFIP(cuit, clave) {
     console.log(`[${cuit}] Comenzando suma de comprobantes...`);
     let totalFacturacion = 0.0;
     let hayPaginaSiguiente = true;
-    let paginaActual = 1;
+    let numeroPagina = 1;
 
     while (hayPaginaSiguiente) {
-      console.log(`[${cuit}] Procesando página ${paginaActual}...`);
+      console.log(`[${cuit}] Procesando página ${numeroPagina}...`);
 
       const { sumaPagina, filasProcesadas } = await page.evaluate(() => {
         let suma = 0.0;
@@ -329,7 +319,7 @@ async function procesarClienteAFIP(cuit, clave) {
       });
 
       totalFacturacion += sumaPagina;
-      console.log(`[${cuit}] Página ${paginaActual}: ${filasProcesadas} filas. Acumulado: $${totalFacturacion.toLocaleString('es-AR', {minimumFractionDigits: 2})}`);
+      console.log(`[${cuit}] Página ${numeroPagina}: ${filasProcesadas} filas. Acumulado: $${totalFacturacion.toLocaleString('es-AR', {minimumFractionDigits: 2})}`);
 
       // ============================================
       // PASO 13: VERIFICAR PÁGINA SIGUIENTE
@@ -349,7 +339,7 @@ async function procesarClienteAFIP(cuit, clave) {
       });
 
       if (existeSiguiente) {
-        paginaActual++;
+        numeroPagina++;
         await sleep(3000);
       } else {
         hayPaginaSiguiente = false;
@@ -357,15 +347,177 @@ async function procesarClienteAFIP(cuit, clave) {
     }
 
     // ============================================
-    // PASO 14: TOTALIZAR
+    // PASO 14: TOTALIZAR EMITIDOS
     // ============================================
-    const montoFacturas = totalFacturacion.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    console.log(`[${cuit}] ✓ Total Facturación Emitida: $${montoFacturas}`);
+    const montoEmitidas = totalFacturacion.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    console.log(`[${cuit}] ✓ Total Facturación Emitida: $${montoEmitidas}`);
+
+    // ============================================
+    // PASO 15: ABRIR NUEVA PESTAÑA PARA COMPROBANTES RECIBIDOS
+    // ============================================
+    console.log(`[${cuit}] Procesando Comprobantes Recibidos...`);
+    
+    const nuevaPaginaRecibidos = await browser.newPage();
+    await nuevaPaginaRecibidos.setViewport({ width: 1920, height: 1080 });
+    
+    // Copiar cookies
+    const cookiesActuales = await page.cookies();
+    await nuevaPaginaRecibidos.setCookie(...cookiesActuales);
+    await sleep(1000);
+    
+    // Cerrar pestañas anteriores
+    const todasLasPaginas = await browser.pages();
+    for (const p of todasLasPaginas) {
+      if (p !== nuevaPaginaRecibidos) {
+        await p.close();
+      }
+    }
+    console.log(`[${cuit}] Pestañas anteriores cerradas`);
+    
+    // Navegar a Comprobantes Recibidos
+    console.log(`[${cuit}] Navegando a comprobantesRecibidos.do...`);
+    await nuevaPaginaRecibidos.goto('https://fes.afip.gob.ar/mcmp/jsp/comprobantesRecibidos.do', {
+      waitUntil: 'networkidle2',
+      timeout: 45000
+    });
+    await sleep(5000);
+    
+    console.log(`[${cuit}] URL Recibidos: ${nuevaPaginaRecibidos.url()}`);
+
+    // ============================================
+    // PASO 16: CLICK EN FECHA EMISION (RECIBIDOS)
+    // ============================================
+    console.log(`[${cuit}] Seleccionando fecha para Recibidos...`);
+    await nuevaPaginaRecibidos.click('#fechaEmision');
+    await sleep(1500);
+
+    // ============================================
+    // PASO 17: CLICK EN "AÑO PASADO" (RECIBIDOS)
+    // ============================================
+    await nuevaPaginaRecibidos.click('li[data-range-key="Año Pasado"]');
+    await sleep(1500);
+
+    // ============================================
+    // PASO 18: CLICK EN BUSCAR (RECIBIDOS)
+    // ============================================
+    await nuevaPaginaRecibidos.click('#buscarComprobantes');
+    await sleep(4000);
+
+    // ============================================
+    // PASO 19: CONFIGURAR 50 REGISTROS (RECIBIDOS)
+    // ============================================
+    console.log(`[${cuit}] Configurando vista de 50 registros para Recibidos...`);
+    await nuevaPaginaRecibidos.click('.fa.fa-lg.fa-bars');
+    await sleep(1500);
+
+    await nuevaPaginaRecibidos.evaluate(() => {
+      const links = Array.from(document.querySelectorAll('a'));
+      const link50 = links.find(a => a.textContent.trim() === '50');
+      if (link50) link50.click();
+    });
+    await sleep(4000);
+
+    // ============================================
+    // PASO 20: SUMAR FILA POR FILA (RECIBIDOS)
+    // ============================================
+    console.log(`[${cuit}] Comenzando suma de comprobantes Recibidos...`);
+    let totalRecibidos = 0.0;
+    let hayPaginaSiguienteRecibidos = true;
+    let numeroPaginaRecibidos = 1;
+
+    while (hayPaginaSiguienteRecibidos) {
+      console.log(`[${cuit}] Procesando página ${numeroPaginaRecibidos} (Recibidos)...`);
+
+      const { sumaPagina, filasProcesadas } = await nuevaPaginaRecibidos.evaluate(() => {
+        let suma = 0.0;
+        let procesadas = 0;
+        
+        const filas = document.querySelectorAll('#tablaDataTables tbody tr');
+
+        filas.forEach(fila => {
+          const cols = fila.querySelectorAll('td');
+          if (cols.length < 2) return;
+
+          let tipoComprobante = "";
+          let importeTexto = "";
+          
+          cols.forEach(td => {
+            const texto = td.textContent.trim();
+            
+            if (texto.includes('Factura') || texto.includes('Nota de Crédito') || texto.includes('Nota de Débito') || texto.includes('Recibo')) {
+              tipoComprobante = texto;
+            }
+            
+            if (td.classList.contains('alignRight') && texto.includes('$')) {
+              importeTexto = texto;
+            }
+          });
+
+          if (tipoComprobante && importeTexto) {
+            const importeLimpio = importeTexto
+              .replace('$', '')
+              .replace(/\s/g, '')
+              .replace(/\./g, '')
+              .replace(',', '.')
+              .trim();
+            
+            const importe = parseFloat(importeLimpio);
+
+            if (!isNaN(importe)) {
+              if (tipoComprobante.includes('Factura') || tipoComprobante.includes('Recibo')) {
+                suma += importe;
+              } else if (tipoComprobante.includes('Nota de Crédito')) {
+                suma -= importe;
+              } else if (tipoComprobante.includes('Nota de Débito')) {
+                suma += importe;
+              }
+              procesadas++;
+            }
+          }
+        });
+
+        return { sumaPagina: suma, filasProcesadas: procesadas };
+      });
+
+      totalRecibidos += sumaPagina;
+      console.log(`[${cuit}] Página ${numeroPaginaRecibidos}: ${filasProcesadas} filas. Acumulado Recibidos: $${totalRecibidos.toLocaleString('es-AR', {minimumFractionDigits: 2})}`);
+
+      // ============================================
+      // PASO 21: VERIFICAR PÁGINA SIGUIENTE (RECIBIDOS)
+      // ============================================
+      const existeSiguiente = await nuevaPaginaRecibidos.evaluate(() => {
+        const botones = Array.from(document.querySelectorAll('.paginate_button, .pagination a, li a'));
+        const btnSiguiente = botones.find(b => b.textContent.trim() === '»');
+        
+        if (!btnSiguiente) return false;
+        
+        const parentLi = btnSiguiente.closest('li');
+        if (parentLi && parentLi.classList.contains('disabled')) return false;
+        if (btnSiguiente.classList.contains('disabled')) return false;
+        
+        btnSiguiente.click();
+        return true;
+      });
+
+      if (existeSiguiente) {
+        numeroPaginaRecibidos++;
+        await sleep(3000);
+      } else {
+        hayPaginaSiguienteRecibidos = false;
+      }
+    }
+
+    // ============================================
+    // PASO 22: TOTALIZAR RECIBIDOS
+    // ============================================
+    const montoRecibidas = totalRecibidos.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    console.log(`[${cuit}] ✓ Total Comprobantes Recibidos: $${montoRecibidas}`);
 
     return {
       cuit: cuit,
       nombre: nombreUsuario,
-      facturasEmitidas: montoFacturas,
+      facturasEmitidas: montoEmitidas,
+      comprobantesRecibidos: montoRecibidas,
       timestamp: new Date().toISOString(),
       loginExitoso: true
     };
