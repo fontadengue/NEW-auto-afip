@@ -5,31 +5,37 @@ const XLSX = require("xlsx");
 const fs = require("fs");
 const puppeteer = require("puppeteer");
 const path = require("path");
-const nodemailer = require("nodemailer");
+const { Resend } = require('resend');
 require("dotenv").config();
 
 const app = express();
 
 // ================================
-// CONFIGURACIÓN DE NODEMAILER
+// CONFIGURACIÓN DE RESEND
 // ================================
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || "smtp.gmail.com",
-  port: process.env.SMTP_PORT || 587,
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
-});
+let resend = null;
+if (process.env.RESEND_API_KEY) {
+  resend = new Resend(process.env.RESEND_API_KEY);
+  console.log('✅ Resend configurado');
+} else {
+  console.warn('⚠️  RESEND_API_KEY no configurado - Los emails no se enviarán');
+}
 
-// Función para enviar email
+// Función para enviar email con Resend
 async function enviarEmail(destinatario, excelPath, filename) {
+  if (!resend) {
+    console.log('⚠️  Email no enviado - RESEND_API_KEY no configurado');
+    return false;
+  }
+
   try {
-    const info = await transporter.sendMail({
-      from: `"AFIP Automation" <${process.env.SMTP_USER}>`,
-      to: destinatario,
-      subject: "✅ Resultados AFIP - Proceso Completado",
+    // Leer archivo Excel como base64
+    const attachment = fs.readFileSync(excelPath).toString('base64');
+    
+    const { data, error } = await resend.emails.send({
+      from: process.env.RESEND_FROM_EMAIL || 'AFIP Automation <onboarding@resend.dev>',
+      to: [destinatario],
+      subject: '✅ Resultados AFIP - Proceso Completado',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #4F46E5;">🎉 Proceso Completado</h2>
@@ -48,12 +54,17 @@ async function enviarEmail(destinatario, excelPath, filename) {
       attachments: [
         {
           filename: filename,
-          path: excelPath
+          content: attachment
         }
       ]
     });
     
-    console.log("📧 Email enviado:", info.messageId);
+    if (error) {
+      console.error("❌ Error enviando email:", error);
+      return false;
+    }
+    
+    console.log("📧 Email enviado via Resend:", data.id);
     return true;
   } catch (error) {
     console.error("❌ Error enviando email:", error);
