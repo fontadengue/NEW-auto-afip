@@ -100,7 +100,7 @@ async function procesarClienteAFIP(cuit, clave) {
     });
 
     console.log(`[${cuit}] Página de login cargada`);
-    await sleep(10000);
+    await sleep(7000);
 
     // ============================================
     // PASO 2: INGRESAR CUIT
@@ -108,9 +108,9 @@ async function procesarClienteAFIP(cuit, clave) {
     console.log(`[${cuit}] Ingresando CUIT...`);
     await page.waitForSelector('#F1\\:username', { timeout: 10000 });
     await page.click('#F1\\:username');
-    await sleep(10000);
+    await sleep(7000);
     await page.type('#F1\\:username', cuit, { delay: 50 + Math.random() * 50 });
-    await sleep(10000);
+    await sleep(7000);
     await page.click('#F1\\:btnSiguiente');
 
     console.log(`[${cuit}] CUIT ingresado, esperando campo de contraseña...`);
@@ -123,9 +123,9 @@ async function procesarClienteAFIP(cuit, clave) {
     // Esperar directamente a que aparezca el campo de contraseña
     await page.waitForSelector('#F1\\:password', { visible: true, timeout: 30000 });
     await page.click('#F1\\:password');
-    await sleep(10000);
+    await sleep(7000);
     await page.type('#F1\\:password', clave, { delay: 50 + Math.random() * 50 });
-    await sleep(10000);
+    await sleep(7000);
     await page.click('#F1\\:btnIngresar');
 
     console.log(`[${cuit}] Contraseña ingresada, esperando dashboard...`);
@@ -133,7 +133,7 @@ async function procesarClienteAFIP(cuit, clave) {
       waitUntil: 'networkidle2',
       timeout: 30000
     });
-    await sleep(10000);
+    await sleep(7000);
 
     // ============================================
     // PASO 4: VERIFICAR LOGIN EXITOSO
@@ -145,7 +145,7 @@ async function procesarClienteAFIP(cuit, clave) {
     }
 
     console.log(`[${cuit}] ✓ Login exitoso`);
-    await sleep(10000);
+    await sleep(7000);
 
     // ============================================
     // PASO 5: EXTRAER NOMBRE DEL USUARIO
@@ -168,7 +168,7 @@ async function procesarClienteAFIP(cuit, clave) {
       console.log(`[${cuit}] Error extrayendo nombre:`, e.message);
     }
 
-    await sleep(10000);
+    await sleep(7000);
 
     // ============================================
     // PASO 6: BUSCAR "MIS COMPROBANTES"
@@ -178,11 +178,11 @@ async function procesarClienteAFIP(cuit, clave) {
     // Click en el buscador
     await page.waitForSelector('#buscadorInput', { timeout: 10000 });
     await page.click('#buscadorInput');
-    await sleep(10000);
+    await sleep(7000);
     
     // Escribir "Mis Comprobantes"
     await page.type('#buscadorInput', 'Mis Comprobantes');
-    await sleep(10000);
+    await sleep(7000);
     
     // Click en el resultado "Mis Comprobantes"
     console.log(`[${cuit}] Haciendo click en resultado...`);
@@ -196,7 +196,7 @@ async function procesarClienteAFIP(cuit, clave) {
         miComprobantes.click();
       }
     });
-    await sleep(10000);
+    await sleep(7000);
 
     // ============================================
     // PASO 7: NAVEGAR A COMPROBANTES EMITIDOS (MISMA PESTAÑA)
@@ -206,7 +206,7 @@ async function procesarClienteAFIP(cuit, clave) {
       waitUntil: 'networkidle2',
       timeout: 45000
     });
-    await sleep(10000);
+    await sleep(7000);
     
     // Cerrar otras pestañas abiertas
     const paginasAbiertas = await browser.pages();
@@ -217,7 +217,7 @@ async function procesarClienteAFIP(cuit, clave) {
     }
     console.log(`[${cuit}] Otras pestañas cerradas`);
     
-    await sleep(10000);
+    await sleep(7000);
     
     // Verificar URL actual
     const urlEmitidos = page.url();
@@ -228,33 +228,33 @@ async function procesarClienteAFIP(cuit, clave) {
     // ============================================
     console.log(`[${cuit}] Seleccionando fecha...`);
     await page.click('#fechaEmision');
-    await sleep(10000);
+    await sleep(7000);
 
     // ============================================
     // PASO 9: CLICK EN "AÑO PASADO"
     // ============================================
     await page.click('li[data-range-key="Año Pasado"]');
-    await sleep(10000);
+    await sleep(7000);
 
     // ============================================
     // PASO 10: CLICK EN BUSCAR
     // ============================================
     await page.click('#buscarComprobantes');
-    await sleep(10000);
+    await sleep(7000);
 
     // ============================================
     // PASO 11: CONFIGURAR 50 REGISTROS
     // ============================================
     console.log(`[${cuit}] Configurando vista de 50 registros...`);
     await page.click('.fa.fa-lg.fa-bars');
-    await sleep(10000);
+    await sleep(7000);
 
     await page.evaluate(() => {
       const links = Array.from(document.querySelectorAll('a'));
       const link50 = links.find(a => a.textContent.trim() === '50');
       if (link50) link50.click();
     });
-    await sleep(10000);
+    await sleep(7000);
 
     // ============================================
     // PASO 12: SUMAR FILA POR FILA
@@ -340,7 +340,7 @@ async function procesarClienteAFIP(cuit, clave) {
 
       if (existeSiguiente) {
         numeroPagina++;
-        await sleep(10000);
+        await sleep(7000);
       } else {
         hayPaginaSiguiente = false;
       }
@@ -363,7 +363,7 @@ async function procesarClienteAFIP(cuit, clave) {
     // Copiar cookies
     const cookiesActuales = await page.cookies();
     await nuevaPaginaRecibidos.setCookie(...cookiesActuales);
-    await sleep(10000);
+    await sleep(7000);
     
     // Cerrar pestañas anteriores
     const todasLasPaginas = await browser.pages();
@@ -380,7 +380,7 @@ async function procesarClienteAFIP(cuit, clave) {
       waitUntil: 'networkidle2',
       timeout: 45000
     });
-    await sleep(10000);
+    await sleep(7000);
     
     console.log(`[${cuit}] URL Recibidos: ${nuevaPaginaRecibidos.url()}`);
 
@@ -389,33 +389,33 @@ async function procesarClienteAFIP(cuit, clave) {
     // ============================================
     console.log(`[${cuit}] Seleccionando fecha para Recibidos...`);
     await nuevaPaginaRecibidos.click('#fechaEmision');
-    await sleep(10000);
+    await sleep(7000);
 
     // ============================================
     // PASO 17: CLICK EN "AÑO PASADO" (RECIBIDOS)
     // ============================================
     await nuevaPaginaRecibidos.click('li[data-range-key="Año Pasado"]');
-    await sleep(10000);
+    await sleep(7000);
 
     // ============================================
     // PASO 18: CLICK EN BUSCAR (RECIBIDOS)
     // ============================================
     await nuevaPaginaRecibidos.click('#buscarComprobantes');
-    await sleep(10000);
+    await sleep(7000);
 
     // ============================================
     // PASO 19: CONFIGURAR 50 REGISTROS (RECIBIDOS)
     // ============================================
     console.log(`[${cuit}] Configurando vista de 50 registros para Recibidos...`);
     await nuevaPaginaRecibidos.click('.fa.fa-lg.fa-bars');
-    await sleep(10000);
+    await sleep(7000);
 
     await nuevaPaginaRecibidos.evaluate(() => {
       const links = Array.from(document.querySelectorAll('a'));
       const link50 = links.find(a => a.textContent.trim() === '50');
       if (link50) link50.click();
     });
-    await sleep(10000);
+    await sleep(7000);
 
     // ============================================
     // PASO 20: SUMAR FILA POR FILA (RECIBIDOS)
@@ -501,7 +501,7 @@ async function procesarClienteAFIP(cuit, clave) {
 
       if (existeSiguiente) {
         numeroPaginaRecibidos++;
-        await sleep(10000);
+        await sleep(7000);
       } else {
         hayPaginaSiguienteRecibidos = false;
       }
