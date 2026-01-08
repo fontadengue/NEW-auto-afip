@@ -118,7 +118,8 @@ app.post("/api/process", upload.single("excel"), async (req, res) => {
         resultados.push({
           numCliente: NUM_CLIENTE,
           nombre: resultado.nombre,
-          facturasEmitidas: resultado.facturasEmitidas
+          facturasEmitidas: resultado.facturasEmitidas,
+          comprobantesRecibidos: resultado.comprobantesRecibidos
         });
         console.log(`✅ [${i + 1}/${total}] Procesado exitosamente`);
 
@@ -128,7 +129,8 @@ app.post("/api/process", upload.single("excel"), async (req, res) => {
         resultados.push({
           numCliente: NUM_CLIENTE,
           nombre: `ERROR: ${error.message}`,
-          facturasEmitidas: 'N/A'
+          facturasEmitidas: 'N/A',
+          comprobantesRecibidos: 'N/A'
         });
       }
 
@@ -148,8 +150,13 @@ app.post("/api/process", upload.single("excel"), async (req, res) => {
     // CREAR EXCEL DE SALIDA
     // ================================
     const datosExcel = [
-      ['Num de Cliente', 'Nombre del Cliente', 'Facturas Emitidas'],
-      ...resultados.map(r => [r.numCliente, r.nombre, r.facturasEmitidas || 'N/A'])
+      ['Num de Cliente', 'Nombre del Cliente', 'Comprobantes Emitidos', 'Comprobantes Recibidos'],
+      ...resultados.map(r => [
+        r.numCliente, 
+        r.nombre, 
+        r.facturasEmitidas || 'N/A',
+        r.comprobantesRecibidos || 'N/A'
+      ])
     ];
 
     const nuevoWorkbook = XLSX.utils.book_new();
