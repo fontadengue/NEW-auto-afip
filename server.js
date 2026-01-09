@@ -185,7 +185,8 @@ app.post("/api/process", upload.single("excel"), async (req, res) => {
           numCliente: NUM_CLIENTE,
           nombre: resultado.nombre,
           facturasEmitidas: resultado.facturasEmitidas,
-          comprobantesRecibidos: resultado.comprobantesRecibidos
+          comprobantesRecibidos: resultado.comprobantesRecibidos,
+          deudaCCMA: resultado.deudaCCMA
         });
         console.log(`✅ [${i + 1}/${total}] Procesado exitosamente`);
 
@@ -196,7 +197,8 @@ app.post("/api/process", upload.single("excel"), async (req, res) => {
           numCliente: NUM_CLIENTE,
           nombre: `ERROR: ${error.message}`,
           facturasEmitidas: 'N/A',
-          comprobantesRecibidos: 'N/A'
+          comprobantesRecibidos: 'N/A',
+          deudaCCMA: 'N/A'
         });
       }
 
@@ -216,12 +218,13 @@ app.post("/api/process", upload.single("excel"), async (req, res) => {
     // CREAR EXCEL DE SALIDA
     // ================================
     const datosExcel = [
-      ['Num de Cliente', 'Nombre del Cliente', 'Comprobantes Emitidos', 'Comprobantes Recibidos'],
+      ['Num de Cliente', 'Nombre del Cliente', 'Comprobantes Emitidos', 'Comprobantes Recibidos', 'Deuda CCMA'],
       ...resultados.map(r => [
         r.numCliente, 
         r.nombre, 
         r.facturasEmitidas || 'N/A',
-        r.comprobantesRecibidos || 'N/A'
+        r.comprobantesRecibidos || 'N/A',
+        r.deudaCCMA || 'N/A'
       ])
     ];
 
