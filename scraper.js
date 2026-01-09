@@ -513,11 +513,156 @@ async function procesarClienteAFIP(cuit, clave) {
     const montoRecibidas = totalRecibidos.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     console.log(`[${cuit}] ✓ Total Comprobantes Recibidos: $${montoRecibidas}`);
 
+    // ============================================
+    // PASO 23: ABRIR NUEVA PESTAÑA PARA CCMA
+    // ============================================
+    console.log(`[${cuit}] Procesando CCMA (Cuenta Corriente)...`);
+    
+    // Obtener cookies de la pestaña actual (Recibidos) antes de crear nueva
+    const cookiesCCMA = await nuevaPaginaRecibidos.cookies();
+    
+    const paginaCCMA = await browser.newPage();
+    await paginaCCMA.setViewport({ width: 1920, height: 1080 });
+    
+    // Copiar cookies
+    await paginaCCMA.setCookie(...cookiesCCMA);
+    await sleep(7000);
+    
+    // PRIMERO: Navegar al portal
+    console.log(`[${cuit}] Navegando al portal AFIP...`);
+    await paginaCCMA.goto('https://portalcf.cloud.afip.gob.ar/portal/app/', {
+      waitUntil: 'networkidle2',
+      timeout: 45000
+    });
+    await sleep(7000);
+    
+    // LUEGO: Cerrar pestañas anteriores (incluyendo nuevaPaginaRecibidos)
+    const todasPestanas = await browser.pages();
+    for (const p of todasPestanas) {
+      if (p !== paginaCCMA) {
+        await p.close();
+      }
+    }
+    console.log(`[${cuit}] Pestañas de Recibidos cerradas`);
+    await sleep(7000);
+
+    // ============================================
+    // PASO 24: BUSCAR "CCMA"
+    // ============================================
+    console.log(`[${cuit}] Buscando "CCMA"...`);
+    await paginaCCMA.click('#buscadorInput');
+    await sleep(7000);
+    await paginaCCMA.type('#buscadorInput', 'CCMA');
+    await sleep(7000);
+
+    // ============================================
+    // PASO 25: CLICK EN RESULTADO CCMA
+    // ============================================
+    console.log(`[${cuit}] Haciendo click en CCMA...`);
+    await paginaCCMA.evaluate(() => {
+      const elementos = Array.from(document.querySelectorAll('p.small.text-muted'));
+      const ccma = elementos.find(el => 
+        el.textContent.includes('CCMA - CUENTA CORRIENTE DE CONTRIBUYENTES MONOTRIBUTISTAS Y AUTONOMOS')
+      );
+      if (ccma) {
+        ccma.click();
+      }
+    });
+    await sleep(7000);
+
+    // ============================================
+    // PASO 26: ESPERAR Y CERRAR PESTAÑAS EXTRAS
+    // ============================================
+    console.log(`[${cuit}] Esperando carga de CCMA...`);
+    await sleep(10000);
+    
+    // Buscar la pestaña con el link correcto
+    const todasLasPestanas = await browser.pages();
+    let paginaCtaCte = null;
+    
+    for (const p of todasLasPestanas) {
+      const url = p.url();
+      if (url.includes('servicios2.afip.gob.ar/tramites_con_clave_fiscal/ccam/P02_ctacte.asp')) {
+        paginaCtaCte = p;
+      }
+    }
+    
+    if (!paginaCtaCte) {
+      // Si no se abrió automáticamente, usar la página actual
+      paginaCtaCte = todasLasPestanas[todasLasPestanas.length - 1];
+    }
+    
+    // Cerrar todas las pestañas menos la de cuenta corriente
+    for (const p of todasLasPestanas) {
+      if (p !== paginaCtaCte) {
+        await p.close();
+      }
+    }
+    console.log(`[${cuit}] Pestañas cerradas, solo CCMA activa`);
+    await sleep(7000);
+
+    // ============================================
+    // PASO 27: CLICK EN "CALCULO DE DEUDA"
+    // ============================================
+    console.log(`[${cuit}] Haciendo click en Cálculo de Deuda...`);
+    
+    // Click y esperar navegación
+    await Promise.all([
+      paginaCtaCte.waitForNavigation({ waitUntil: 'networkidle2', timeout: 45000 }),
+      paginaCtaCte.evaluate(() => {
+        const botones = Array.from(document.querySelectorAll('input[type="button"]'));
+        const btnCalculo = botones.find(b => b.value === 'CALCULO DE DEUDA');
+        if (btnCalculo) {
+          btnCalculo.click();
+        }
+      })
+    ]);
+    
+    console.log(`[${cuit}] Página de Cálculo de Deuda cargada`);
+    await sleep(7000);
+
+    // ============================================
+    // PASO 28: VERIFICAR SI TIENE DEUDA DE AUTONOMOS
+    // ============================================
+    console.log(`[${cuit}] Verificando deuda CCMA...`);
+    let deudaCCMA = '0.00';
+    
+    const tieneDeudaAutonomos = await paginaCtaCte.evaluate(() => {
+      const celdas = Array.from(document.querySelectorAll('td'));
+      return celdas.some(td => 
+        td.textContent.includes('Obligacion Mensual Auton./Monot.')
+      );
+    });
+    
+    if (tieneDeudaAutonomos) {
+      console.log(`[${cuit}] ⚠️  Tiene deuda de autónomos`);
+      deudaCCMA = 'Tiene deuda de autonomos';
+    } else {
+      // Extraer el valor de la deuda
+      const montoDeuda = await paginaCtaCte.evaluate(() => {
+        const celdas = Array.from(document.querySelectorAll('td.CeldaTitularResaltado'));
+        for (const celda of celdas) {
+          const texto = celda.textContent.trim();
+          if (/^\d+\.\d{2}$/.test(texto)) {
+            return texto;
+          }
+        }
+        return '0.00';
+      });
+      
+      deudaCCMA = montoDeuda;
+      console.log(`[${cuit}] Deuda CCMA: $${deudaCCMA}`);
+    }
+
+    // ============================================
+    // PASO 29: RETORNAR TODOS LOS DATOS
+    // ============================================
     return {
       cuit: cuit,
       nombre: nombreUsuario,
       facturasEmitidas: montoEmitidas,
       comprobantesRecibidos: montoRecibidas,
+      deudaCCMA: deudaCCMA,
       timestamp: new Date().toISOString(),
       loginExitoso: true
     };
